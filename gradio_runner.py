@@ -3,16 +3,32 @@ import requests
 import threading
 import time
 import os
+from PIL import Image
+from io import BytesIO
+import glob
 
 API_URL = "http://localhost:8000"
 
 # Shared state for logs and results
 display_logs = []
-display_results = []
+display_logs_lock = threading.Lock()
+
+def get_video_device_choices():
+    # Scan for /dev/video* devices
+    devices = sorted(glob.glob("/dev/video*"))
+    choices = ["Upload Video"]
+    for dev in devices:
+        choices.append(f"Webcam: {dev}")
+    return choices
+
+video_device_choices = get_video_device_choices()
 
 # Helper to call /start endpoint
-def start_orchestration(video_file, trigger):
-    try:
+def start_orchestration(source_type, video_file, trigger):
+    # If a webcam device is selected, use the device path as the source
+    if source_type.startswith("Webcam: "):
+        video_path = source_type.replace("Webcam: ", "")
+    else:
         if video_file is None:
             return "Please upload a video file.", "\n".join(display_logs)
         if isinstance(video_file, dict) and "name" in video_file:
@@ -21,16 +37,20 @@ def start_orchestration(video_file, trigger):
             video_path = video_file
         else:
             return "Invalid video input.", "\n".join(display_logs)
+    try:
         resp = requests.post(f"{API_URL}/start", json={"source": video_path, "trigger": trigger})
         if resp.ok:
             msg = resp.json().get("message", "Started.")
-            display_logs.append(f"[START] {msg}")
+            with display_logs_lock:
+                display_logs.append(f"[START] {msg}")
             return msg, "\n".join(display_logs)
         else:
-            display_logs.append(f"[START][ERROR] {resp.text}")
+            with display_logs_lock:
+                display_logs.append(f"[START][ERROR] {resp.text}")
             return f"Error: {resp.text}", "\n".join(display_logs)
     except Exception as e:
-        display_logs.append(f"[START][EXCEPTION] {e}")
+        with display_logs_lock:
+            display_logs.append(f"[START][EXCEPTION] {e}")
         return f"Exception: {e}", "\n".join(display_logs)
 
 # Helper to update trigger
@@ -39,13 +59,16 @@ def update_trigger(trigger):
         resp = requests.put(f"{API_URL}/trigger", json={"trigger": trigger})
         if resp.ok:
             msg = resp.json().get("message", "Trigger updated.")
-            display_logs.append(f"[TRIGGER] {msg}")
+            with display_logs_lock:
+                display_logs.append(f"[TRIGGER] {msg}")
             return msg
         else:
-            display_logs.append(f"[TRIGGER][ERROR] {resp.text}")
+            with display_logs_lock:
+                display_logs.append(f"[TRIGGER][ERROR] {resp.text}")
             return f"Error: {resp.text}"
     except Exception as e:
-        display_logs.append(f"[TRIGGER][EXCEPTION] {e}")
+        with display_logs_lock:
+            display_logs.append(f"[TRIGGER][EXCEPTION] {e}")
         return f"Exception: {e}"
 
 def infer_large(image_file):
@@ -72,6 +95,24 @@ def infer_large(image_file):
     except Exception as e:
         return None, f"Exception: {e}"
 
+def fetch_latest_small_inference_frame():
+    try:
+        resp = requests.get(f"{API_URL}/latest-small-inference-frame", timeout=2)
+        if resp.ok:
+            return Image.open(BytesIO(resp.content))
+    except Exception:
+        pass
+    return None
+
+def fetch_latest_small_inference_result():
+    try:
+        resp = requests.get(f"{API_URL}/latest-small-inference-result", timeout=2)
+        if resp.ok:
+            return resp.json()
+    except Exception:
+        pass
+    return {}
+
 # Polling thread for logs/results (dummy: just shows logs for now)
 def poll_results():
     # In a real app, you might poll a /results or /logs endpoint
@@ -80,8 +121,9 @@ def poll_results():
         time.sleep(2)
         # This could be extended to fetch actual inference results
         # For now, just keep logs up to date
-        if len(display_logs) > 20:
-            del display_logs[:-20]
+        with display_logs_lock:
+            if len(display_logs) > 20:
+                del display_logs[:-20]
 
 # Start polling in background
 t = threading.Thread(target=poll_results, daemon=True)
@@ -92,6 +134,7 @@ def gradio_ui():
         gr.Markdown("# VLM Camera Service Gradio Runner")
         with gr.Tab("Orchestration"):
             with gr.Row():
+                source_type = gr.Dropdown(choices=video_device_choices, value=video_device_choices[0], label="Source Type")
                 video_input = gr.Video(label="Upload Video File")
                 trigger = gr.Textbox(label="Trigger Description", value="a person falling down")
             with gr.Row():
@@ -100,20 +143,45 @@ def gradio_ui():
             status = gr.Textbox(label="Status", interactive=False)
             logs = gr.Textbox(label="Logs", lines=10, interactive=False)
 
-            def on_start(video, trig):
-                return start_orchestration(video, trig)
+            def on_start(src_type, video, trig):
+                msg, logs_str = start_orchestration(src_type, video, trig)
+                with display_logs_lock:
+                    return msg, "\n".join(display_logs)
 
             def on_update(trig):
                 msg = update_trigger(trig)
-                return msg, "\n".join(display_logs)
+                with display_logs_lock:
+                    return msg, "\n".join(display_logs)
 
-            start_btn.click(on_start, inputs=[video_input, trigger], outputs=[status, logs])
+            start_btn.click(on_start, inputs=[source_type, video_input, trigger], outputs=[status, logs])
             update_btn.click(on_update, inputs=[trigger], outputs=[status, logs])
 
-            # Periodically update logs
             def update_logs():
-                return "\n".join(display_logs)
+                with display_logs_lock:
+                    return "\n".join(display_logs)
             logs.change(fn=update_logs, outputs=logs)
+
+            # Display the latest small inference frame with automatic refresh every second
+            gr.Markdown("### Latest Small Inference Frame (Auto-Refresh)")
+            latest_small_frame = gr.Image(label="Latest Small Inference Frame")
+
+            def refresh_small_frame_auto():
+                frame = fetch_latest_small_inference_frame()
+                result = fetch_latest_small_inference_result()
+                if result and result.get("result") is not None:
+                    new_log = f"[SMALL INFERENCE RESULT] {result}"
+                    with display_logs_lock:
+                        if not display_logs or display_logs[-1] != new_log:
+                            display_logs.append(new_log)
+                with display_logs_lock:
+                    return frame, "\n".join(display_logs)
+
+            timer = gr.Timer(value=1)
+            timer.change(
+                fn=refresh_small_frame_auto,
+                inputs=[],
+                outputs=[latest_small_frame, logs],
+            )
 
             # Placeholder for future: video frame inference (only one at a time)
             # with gr.Row():
@@ -134,31 +202,6 @@ def gradio_ui():
             #         queue=True,
             #         show_progress=True,
             #     )
-
-        gr.Markdown("---")
-        gr.Markdown("## Direct Large Inference (Image Upload)")
-        with gr.Row():
-            image_input = gr.Image(type="filepath", label="Upload Image for Inference")
-        with gr.Row():
-            infer_btn = gr.Button("Run Large Inference")
-        with gr.Row():
-            image_display = gr.Image(label="Image Sent for Inference")
-            result_display = gr.JSON(label="Inference Result")
-        status_box = gr.Textbox(label="Inference Status", interactive=False)
-
-        # Generator callback: disables button, shows status, then re-enables
-        def on_infer(image_file):
-            yield gr.update(interactive=False), gr.update(value="Running inference..."), None, None
-            img_path, result = infer_large(image_file)
-            yield gr.update(interactive=True), gr.update(value="Done."), img_path, result
-
-        infer_btn.click(
-            on_infer,
-            inputs=[image_input],
-            outputs=[infer_btn, status_box, image_display, result_display],
-            queue=True,  # Only one request at a time
-            show_progress=True,
-        )
 
     return demo
 
