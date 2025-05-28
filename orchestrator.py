@@ -3,6 +3,8 @@
 import time
 import threading
 from typing import Optional, List # Required for List type hint if used explicitly
+import os  # Fix linter error for os
+import subprocess  # Fix linter error for subprocess
 
 # Assuming ImageFrame type is consistent (np.ndarray)
 from video_source import get_video_stream, extract_i_frame, VideoStream, ImageFrame
@@ -14,6 +16,7 @@ from inference_large import run_large_inference, LargeInferenceOutput
 # Constants based on PLANNING.md or derived for the orchestration logic
 IFRAME_INTERVAL_SECONDS = 2.0
 BUFFER_SIZE = 10 # As per PLANNING.md: "rolling buffer of 10 I-frames"
+FRAME_GRAB_INTERVAL = 1/30  # 30 FPS (adjust as needed)
 
 class OrchestrationConfig:
     """Configuration for an orchestration task, allowing dynamic updates."""
@@ -36,33 +39,32 @@ class OrchestrationConfig:
             else:
                 print(f"[OrchestrationConfig] INFO: Trigger description is already '{new_description}'. No change made.")
 
+def frame_grabber(video_stream, frame_buffer, buffer_lock, stop_event):
+    """
+    Continuously reads frames from the video stream and fills the buffer in real time.
+    """
+    print("[FrameGrabber] INFO: Starting frame grabber thread.")
+    while not stop_event.is_set():
+        ret, frame = video_stream.read()
+        if not ret:
+            print("[FrameGrabber] INFO: End of stream or failed to read frame.")
+            break
+        with buffer_lock:
+            frame_buffer.append(frame)
+        time.sleep(FRAME_GRAB_INTERVAL)
+    print("[FrameGrabber] INFO: Frame grabber thread exiting.")
+
 def orchestrate_processing(
     config: OrchestrationConfig,
     stop_event: Optional[threading.Event] = None
 ) -> None:
     """
-    Coordinates the video processing pipeline.
-
-    This function handles:
-    1. Connecting to the video source.
-    2. Initializing a frame buffer.
-    3. Periodically extracting frames (intended as I-frames).
-    4. Running inference with a small VLM on these frames.
-    5. Updating the frame buffer with processed frames.
-    6. Evaluating a trigger based on the small VLM's output.
-    7. If triggered, running inference with a large VLM on the triggering frame.
-    8. Gracefully handling shutdown via an optional threading.Event.
-
-    Args:
-        config (OrchestrationConfig): The configuration for the orchestration task.
-        stop_event (Optional[threading.Event], optional):
-            A threading.Event to signal when to stop processing.
-            If None, the loop runs until the video ends or an error occurs.
-            Defaults to None.
+    Coordinates the video processing pipeline with real-time frame grabbing.
     """
     video_stream: Optional[VideoStream] = None
+    buffer_lock = threading.Lock()
     try:
-        source_uri = config.source_uri # Get source_uri from config
+        source_uri = config.source_uri
         print(f"[Orchestrator] INFO: Attempting to connect to video source: {source_uri}")
         video_stream = get_video_stream(source_uri)
         print(f"[Orchestrator] INFO: Successfully connected to video source. FPS: {video_stream.get_fps()}")
@@ -70,42 +72,39 @@ def orchestrate_processing(
         frame_buffer: FrameBuffer = init_frame_buffer(size=BUFFER_SIZE)
         print(f"[Orchestrator] INFO: Initialized frame buffer with size {BUFFER_SIZE}.")
 
-        # last_processed_time tracks the time when the last frame processing cycle started.
-        last_processed_time = time.time() - IFRAME_INTERVAL_SECONDS # Ensure first frame is processed immediately
+        # Start frame grabber thread
+        grabber_stop_event = stop_event or threading.Event()
+        grabber_thread = threading.Thread(target=frame_grabber, args=(video_stream, frame_buffer, buffer_lock, grabber_stop_event), daemon=True)
+        grabber_thread.start()
+
+        last_processed_time = time.time() - IFRAME_INTERVAL_SECONDS
 
         while True:
             if stop_event and stop_event.is_set():
                 print("[Orchestrator] INFO: Stop event received, terminating processing loop.")
                 break
 
-            # Get the current trigger description dynamically within the loop
             current_trigger_description = config.get_trigger_description()
-
             current_time = time.time()
             elapsed_since_last_process = current_time - last_processed_time
 
             if elapsed_since_last_process >= IFRAME_INTERVAL_SECONDS:
-                last_processed_time = current_time # Mark start of this processing cycle
+                last_processed_time = current_time
+                print(f"[Orchestrator] DEBUG: Cycle start at {time.strftime('%Y-%m-%d %H:%M:%S')}. Trigger: '{current_trigger_description}'.")
 
-                print(f"[Orchestrator] DEBUG: Cycle start at {time.strftime('%Y-%m-%d %H:%M:%S')}. Trigger: '{current_trigger_description}'. Attempting frame extraction.")
-
-                # Note: video_source.extract_i_frame currently reads the next available frame.
-                # The term "i_frame" here refers to the frame intended for small model processing.
-                current_frame: Optional[ImageFrame] = extract_i_frame(video_stream)
+                # Get the latest frame from the buffer
+                with buffer_lock:
+                    if frame_buffer:
+                        current_frame = frame_buffer[-1]
+                    else:
+                        current_frame = None
 
                 if current_frame is None:
-                    print("[Orchestrator] INFO: Failed to extract frame or end of stream reached. Stopping.")
-                    break
+                    print("[Orchestrator] INFO: No frames in buffer. Waiting for frames.")
+                    time.sleep(0.1)
+                    continue
 
-                print(f"[Orchestrator] DEBUG: Frame extracted. Shape: {current_frame.shape}")
-
-                # Update buffer with the extracted frame, as per PLANNING.md:
-                # "buffer frames mirror those sent to the small model."
-                # This means the buffer updates at IFRAME_INTERVAL_SECONDS.
-                # The "updated every second" for buffer in PLANNING.md is interpreted as being tied to this cycle
-                # if the buffer strictly contains these processed frames.
-                update_buffer(frame_buffer, current_frame)
-                print(f"[Orchestrator] DEBUG: Frame buffer updated. Current buffer size: {len(frame_buffer)}")
+                print(f"[Orchestrator] DEBUG: Using latest frame from buffer. Shape: {current_frame.shape}")
 
                 print(f"[Orchestrator] INFO: Running small inference for trigger: '{current_trigger_description}'")
                 small_inference_out: Optional[str] = run_small_inference(current_frame, current_trigger_description)
@@ -117,21 +116,16 @@ def orchestrate_processing(
                         large_inference_out: Optional[LargeInferenceOutput] = run_large_inference(current_frame)
                         if large_inference_out:
                             print(f"[Orchestrator] INFO: Large inference result - Caption: '{large_inference_out.caption}', Tags: {large_inference_out.tags}, Analysis: '{large_inference_out.detailed_analysis[:100]}...'")
-                            # TODO: Further actions: send to UI, log to database, etc.
                         else:
                             print("[Orchestrator] WARN: Large inference failed or returned no result.")
-                    # else: (No specific action if trigger not met, already printed)
-                    #    print("[Orchestrator] DEBUG: Trigger NOT met.")
                 else:
                     print("[Orchestrator] WARN: Small inference failed or returned no result.")
             else:
-                # Not yet time for the next processing cycle, sleep briefly to yield CPU.
-                # This helps in making the loop responsive to the stop_event and avoids busy-waiting.
-                time.sleep(0.05) # Sleep for 50ms
+                time.sleep(0.05)
 
     except ValueError as ve:
         print(f"[Orchestrator] ERROR: Configuration or source error - {ve}. Terminating.")
-    except FileNotFoundError as fnfe: # Raised by inference modules if ollama is not found
+    except FileNotFoundError as fnfe:
         print(f"[Orchestrator] CRITICAL: Ollama CLI not found - {fnfe}. Ensure Ollama is installed and in PATH. Terminating.")
     except Exception as e:
         import traceback

@@ -93,7 +93,7 @@ def gradio_ui():
         with gr.Tab("Orchestration"):
             with gr.Row():
                 video_input = gr.Video(label="Upload Video File")
-                trigger = gr.Textbox(label="Trigger Description", value="a person wearing a red hat")
+                trigger = gr.Textbox(label="Trigger Description", value="a person falling down")
             with gr.Row():
                 start_btn = gr.Button("Start Orchestration")
                 update_btn = gr.Button("Update Trigger")
