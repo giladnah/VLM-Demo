@@ -1,1 +1,10 @@
+fastapi
+uvicorn
+pydantic
+opencv-python
+numpy
+pytest
+typeguard
+python-multipart
 requests
+gradio
