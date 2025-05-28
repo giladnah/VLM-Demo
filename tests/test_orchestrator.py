@@ -7,7 +7,7 @@ from unittest.mock import patch, MagicMock, call # call for checking multiple ca
 import numpy as np
 
 # Modules to test and their components
-from orchestrator import orchestrate_processing, IFRAME_INTERVAL_SECONDS, BUFFER_SIZE, OrchestrationConfig
+from orchestrator import orchestrator, IFRAME_INTERVAL_SECONDS, BUFFER_SIZE, OrchestrationConfig
 
 # Dependent modules that will be mocked
 # (Actual classes/models are used for type hinting and constructing mock return values)
@@ -104,7 +104,7 @@ class TestOrchestrateProcessing:
 
         stop_event = threading.Event()
         test_config = OrchestrationConfig(source_uri="test_source", initial_trigger_description="test_trigger")
-        orchestrate_processing(test_config, stop_event)
+        orchestrator.start(test_config)
 
         assert mock_get_video_stream.call_count == 1
         mock_get_video_stream.assert_called_with("test_source") # Check that source_uri from config is used
@@ -146,7 +146,7 @@ class TestOrchestrateProcessing:
         mock_time.side_effect = [1000.0, 1002.0, 1004.0] # Control loop for one processing cycle
 
         test_config_no_match = OrchestrationConfig(source_uri="test_source", initial_trigger_description="test_trigger_no_match")
-        orchestrate_processing(test_config_no_match) # stop_event is optional
+        orchestrator.start(test_config_no_match) # stop_event is optional
 
         assert mock_run_small_inference.call_count == 1
         mock_run_small_inference.assert_called_with(dummy_frame, "test_trigger_no_match")
@@ -194,7 +194,7 @@ class TestOrchestrateProcessing:
             mock_time.side_effect = time_side_effect()
 
             test_config_stop_event = OrchestrationConfig(source_uri="test_source", initial_trigger_description="any_trigger")
-            orchestrate_processing(test_config_stop_event, stop_event)
+            orchestrator.start(test_config_stop_event)
 
             # We expect extract_i_frame to be called exactly once.
             assert mock_extract.call_count == 1
@@ -208,7 +208,7 @@ class TestOrchestrateProcessing:
 
         # No need to mock other parts as it should fail early
         test_config_invalid_source = OrchestrationConfig(source_uri="invalid_source", initial_trigger_description="any_trigger")
-        orchestrate_processing(test_config_invalid_source)
+        orchestrator.start(test_config_invalid_source)
         # Assert that some error was printed or logged (if using logging module)
         # For now, just ensure it doesn't hang and completes (implicitly means it handled the error)
         pass
@@ -236,7 +236,7 @@ class TestOrchestrateProcessing:
              patch('orchestrator.run_large_inference') as mock_run_large_inf:
 
             test_config_small_fail = OrchestrationConfig(source_uri="test_source", initial_trigger_description="any")
-            orchestrate_processing(test_config_small_fail)
+            orchestrator.start(test_config_small_fail)
 
             mock_eval_trigger.assert_not_called()
             mock_run_large_inf.assert_not_called()
@@ -266,10 +266,10 @@ class TestOrchestrateProcessing:
 
         mock_time.side_effect = [1000.0, 1002.0, 1004.0]
 
-        # orchestrate_processing catches FileNotFoundError and re-raises it or prints and stops.
+        # orchestrator.start catches FileNotFoundError and re-raises it or prints and stops.
         # The current orchestrator code catches it and prints, then exits finally block.
         # If it were to re-raise, we'd use pytest.raises here.
         # For now, we check that video stream is released, implying termination.
         test_config_ollama_fail = OrchestrationConfig(source_uri="test_source", initial_trigger_description="any")
-        orchestrate_processing(test_config_ollama_fail)
+        orchestrator.start(test_config_ollama_fail)
         mock_video_stream.release.assert_called_once()

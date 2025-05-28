@@ -6,8 +6,11 @@ import os
 from PIL import Image
 from io import BytesIO
 import glob
+from config import get_config
 
-API_URL = "http://localhost:8000"
+CONFIG = get_config()
+API_URL = CONFIG['server_ips']['backend']
+DEFAULT_TRIGGERS = CONFIG.get('default_triggers', ["a person falling down"])
 
 class VLMGradioApp:
     def __init__(self):
@@ -38,7 +41,15 @@ class VLMGradioApp:
             else:
                 return "Invalid video input.", "\n".join(self.display_logs)
         try:
-            resp = requests.post(f"{API_URL}/start", json={"source": video_path, "trigger": trigger})
+            payload = {
+                "source": video_path,
+                "trigger": trigger,
+                "small_model_name": CONFIG['small_model']['name'],
+                "small_ollama_server": CONFIG['small_model']['ollama_server'],
+                "large_model_name": CONFIG['large_model']['name'],
+                "large_ollama_server": CONFIG['large_model']['ollama_server'],
+            }
+            resp = requests.post(f"{API_URL}/start", json=payload)
             if resp.ok:
                 msg = resp.json().get("message", "Started.")
                 with self.display_logs_lock:
@@ -82,7 +93,11 @@ class VLMGradioApp:
                 return None, "Invalid image input."
             with open(image_path, "rb") as f:
                 files = {"image": (os.path.basename(image_path), f, "image/jpeg")}
-                resp = requests.post(f"{API_URL}/infer/large", files=files)
+                data = {
+                    "model_name": CONFIG['large_model']['name'],
+                    "ollama_server": CONFIG['large_model']['ollama_server']
+                }
+                resp = requests.post(f"{API_URL}/infer/large", files=files, data=data)
                 if resp.ok:
                     try:
                         return image_path, resp.json()
@@ -183,7 +198,7 @@ class VLMGradioApp:
                 with gr.Row():
                     source_type = gr.Dropdown(choices=self.video_device_choices, value=self.video_device_choices[0], label="Source Type")
                     video_input = gr.Video(label="Upload Video File")
-                    trigger = gr.Textbox(label="Trigger Description", value="a person falling down")
+                    trigger = gr.Textbox(label="Trigger Description", value=DEFAULT_TRIGGERS[0], placeholder="Enter trigger description")
                 with gr.Row():
                     start_btn = gr.Button("Start Orchestration")
                     update_btn = gr.Button("Update Trigger")

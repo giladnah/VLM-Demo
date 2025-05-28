@@ -9,10 +9,12 @@ import cv2
 import numpy as np
 import subprocess # For health check
 import json # For parsing ollama list output
+from fastapi.responses import FileResponse
 
-from orchestrator import orchestrate_processing, OrchestrationConfig
+from orchestrator import orchestrator, OrchestrationConfig
 from inference_small import run_small_inference as run_small_inference_direct, MODEL_NAME_DEFAULT as SMALL_MODEL_NAME
 from inference_large import run_large_inference as run_large_inference_direct, LargeInferenceOutput, MODEL_NAME_DEFAULT_LARGE as LARGE_MODEL_NAME
+from config import get_config
 
 # TODO: Potentially import Pydantic models for request/response if defined centrally
 # TODO: Import orchestrator and other necessary components when endpoints are added
@@ -50,10 +52,21 @@ current_orchestration_config: Optional[OrchestrationConfig] = None
 current_orchestration_stop_event: Optional[threading.Event] = None
 orchestration_lock = threading.Lock() # Protects access to the global state above
 
+CONFIG = get_config()
+SMALL_MODEL_NAME = CONFIG['small_model']['name']
+SMALL_MODEL_OLLAMA_SERVER = CONFIG['small_model']['ollama_server']
+LARGE_MODEL_NAME = CONFIG['large_model']['name']
+LARGE_MODEL_OLLAMA_SERVER = CONFIG['large_model']['ollama_server']
+DEFAULT_TRIGGERS = CONFIG.get('default_triggers', ["a person falling down"])
+
 class StartRequest(BaseModel):
     """Request model for the /start endpoint."""
     source: str = Field(..., description="The URI of the video source (e.g., RTSP URL, file path).")
     trigger: str = Field(..., description="The initial textual trigger description for VLM inference.")
+    small_model_name: Optional[str] = None
+    small_ollama_server: Optional[str] = None
+    large_model_name: Optional[str] = None
+    large_ollama_server: Optional[str] = None
 
     class Config:
         schema_extra = {
@@ -211,35 +224,25 @@ async def start_processing(request: StartRequest, background_tasks: BackgroundTa
     If a previous orchestration is running, it will be signaled to stop
     before the new one begins with the new configuration.
     """
-    global current_orchestration_stop_event, current_orchestration_config
-
-    with orchestration_lock:
-        if current_orchestration_stop_event is not None:
-            print("[API /start] INFO: Previous orchestration found. Signaling it to stop.")
-            current_orchestration_stop_event.set()
-            # Previous config and event will be replaced
-
-        new_stop_event = threading.Event()
-        current_orchestration_stop_event = new_stop_event
-
-        # Create and store the new configuration object
-        current_orchestration_config = OrchestrationConfig(
-            source_uri=request.source,
-            initial_trigger_description=request.trigger
-        )
-
-    print(f"[API /start] INFO: Starting new orchestration. Source: {current_orchestration_config.source_uri}, Initial Trigger: '{current_orchestration_config.get_trigger_description()}'")
-    background_tasks.add_task(
-        orchestrate_processing,
-        current_orchestration_config, # Pass the config object
-        current_orchestration_stop_event
+    config = OrchestrationConfig(
+        source_uri=request.source,
+        initial_trigger_description=request.trigger
     )
-
+    # Store model/server info in config or orchestrator as needed
+    config.small_model_name = request.small_model_name or SMALL_MODEL_NAME
+    config.small_ollama_server = request.small_ollama_server or SMALL_MODEL_OLLAMA_SERVER
+    config.large_model_name = request.large_model_name or LARGE_MODEL_NAME
+    config.large_ollama_server = request.large_ollama_server or LARGE_MODEL_OLLAMA_SERVER
+    background_tasks.add_task(orchestrator.start, config)
     return {
         "status": "success",
         "message": "Orchestration process started/restarted in the background.",
-        "source": current_orchestration_config.source_uri,
-        "initial_trigger": current_orchestration_config.get_trigger_description()
+        "source": config.source_uri,
+        "initial_trigger": config.get_trigger_description(),
+        "small_model_name": config.small_model_name,
+        "small_ollama_server": config.small_ollama_server,
+        "large_model_name": config.large_model_name,
+        "large_ollama_server": config.large_ollama_server
     }
 
 @app.put("/trigger", tags=["Orchestration"], summary="Updates the trigger description for the active orchestration.")
@@ -248,24 +251,24 @@ async def update_trigger(request: UpdateTriggerRequest):
 
     If no orchestration is active, an error is returned.
     """
-    with orchestration_lock: # Ensure thread-safe access to current_orchestration_config
-        if current_orchestration_config is None or (current_orchestration_stop_event and current_orchestration_stop_event.is_set()):
-            # Check if stop event is set to infer if the task might be stopping or already stopped.
-            # A more robust check would be to see if the background task itself is active.
-            print("[API /trigger] WARN: Attempted to update trigger, but no active orchestration found or it is stopping.")
-            raise HTTPException(status_code=404, detail="No active orchestration process to update. Please start one using /start.")
-
-        print(f"[API /trigger] INFO: Updating trigger description to: '{request.trigger}'")
-        current_orchestration_config.set_trigger_description(request.trigger)
-
-        return {
-            "status": "success",
-            "message": "Trigger description updated for the active orchestration.",
-            "new_trigger": request.trigger
-        }
+    # No need for orchestration_lock or global config, just update via orchestrator
+    if orchestrator._config is None:
+        raise HTTPException(status_code=404, detail="No active orchestration process to update. Please start one using /start.")
+    orchestrator._config.set_trigger_description(request.trigger)
+    return {
+        "status": "success",
+        "message": "Trigger description updated for the active orchestration.",
+        "new_trigger": request.trigger
+    }
 
 @app.post("/infer/small", tags=["Direct Inference"], summary="Performs inference using the small VLM on a single image.")
-async def direct_small_inference(background_tasks: BackgroundTasks, trigger: str = Form(...), image: UploadFile = File(...)) -> Optional[str]:
+async def direct_small_inference(
+    background_tasks: BackgroundTasks,
+    trigger: str = Form(...),
+    image: UploadFile = File(...),
+    model_name: Optional[str] = Form(None),
+    ollama_server: Optional[str] = Form(None)
+) -> Optional[str]:
     """Accepts an image and a trigger description, then runs the small VLM for direct inference.
 
     - **trigger**: The textual trigger description (e.g., "a person on a bike").
@@ -307,7 +310,9 @@ async def direct_small_inference(background_tasks: BackgroundTasks, trigger: str
 
     # Let's make it a blocking call for now as per standard request-response pattern.
     # If it were to use BackgroundTasks, the client would get an immediate 200 OK before result is ready.
-    inference_result = run_small_inference_direct(image_np_array, trigger)
+    model_name = model_name or SMALL_MODEL_NAME
+    ollama_server = ollama_server or SMALL_MODEL_OLLAMA_SERVER
+    inference_result = run_small_inference_direct(image_np_array, trigger, model_name, ollama_url=ollama_server)
 
     if inference_result is None:
         print(f"[API /infer/small] WARN: Small inference direct call returned no result for trigger '{trigger}'.")
@@ -317,7 +322,7 @@ async def direct_small_inference(background_tasks: BackgroundTasks, trigger: str
     return inference_result
 
 @app.post("/infer/large", tags=["Direct Inference"], summary="Performs inference using the large VLM on a single image.")
-async def direct_large_inference(image: UploadFile = File(...)) -> Optional[LargeInferenceOutput]:
+async def direct_large_inference(image: UploadFile = File(...), model_name: Optional[str] = Form(None), ollama_server: Optional[str] = Form(None)) -> Optional[LargeInferenceOutput]:
     """Accepts an image, then runs the large VLM for direct, detailed inference.
 
     - **image**: The image file (JPEG/PNG) to process.
@@ -348,7 +353,9 @@ async def direct_large_inference(image: UploadFile = File(...)) -> Optional[Larg
 
     # Similar to /infer/small, this is a blocking call.
     # Consider fastapi.concurrency.run_in_threadpool if it becomes a performance issue.
-    inference_result = run_large_inference_direct(image_np_array)
+    model_name = model_name or LARGE_MODEL_NAME
+    ollama_server = ollama_server or LARGE_MODEL_OLLAMA_SERVER
+    inference_result = run_large_inference_direct(image_np_array, model_name, ollama_server)
 
     if inference_result is None:
         print(f"[API /infer/large] WARN: Large inference direct call returned no result.")
@@ -356,6 +363,23 @@ async def direct_large_inference(image: UploadFile = File(...)) -> Optional[Larg
 
     print(f"[API /infer/large] INFO: Large inference direct call successful. Caption: '{inference_result.caption}'")
     return inference_result
+
+@app.get("/latest-small-inference-frame", tags=["Debug"], summary="Get the latest frame used for small inference.")
+def get_latest_small_inference_frame():
+    # No lock needed, handled internally
+    return FileResponse(orchestrator.get_latest_small_inference_frame_path(), media_type="image/jpeg")
+
+@app.get("/results_status", tags=["Debug"], summary="Get the status of available inference results.")
+def get_results_status():
+    return orchestrator.get_results_status()
+
+@app.get("/latest-small-inference-result", tags=["Debug"], summary="Get the latest small inference result.")
+def get_latest_small_inference_result():
+    return orchestrator.get_latest_small_inference_result(clear_status=True) or {}
+
+@app.get("/latest-large-inference-result", tags=["Debug"], summary="Get the latest large inference result.")
+def get_latest_large_inference_result():
+    return orchestrator.get_latest_large_inference_result(clear_status=True) or {}
 
 if __name__ == "__main__":
     import uvicorn

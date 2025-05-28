@@ -108,3 +108,50 @@ Refer to `TASKS.md` for detailed initial setup steps, including:
 *   Implement true I-frame detection in `video_source.py`.
 *   More robust error handling and logging.
 *   Database integration for storing inference results or events.
+
+# Setting Up an Ollama Server for Remote REST API Access
+
+To use a remote Ollama server for inference (small or large models), follow these steps:
+
+## 1. Install Ollama on the Remote Machine
+- Follow the official instructions: https://ollama.com/download
+
+## 2. Start Ollama Listening on All Interfaces
+By default, Ollama listens only on `127.0.0.1` (localhost), which is not accessible from other machines.
+
+**To allow remote access, start Ollama with:**
+
+```sh
+OLLAMA_HOST=0.0.0.0 ollama serve
+```
+
+## 3. Open Firewall Port (if needed)
+- Ensure port `11434` is open to your client machine(s).
+- On Ubuntu with UFW:
+  ```sh
+  sudo ufw allow 11434/tcp
+  ```
+- On CentOS/RedHat with firewalld:
+  ```sh
+  sudo firewall-cmd --add-port=11434/tcp --permanent
+  sudo firewall-cmd --reload
+  ```
+
+## 4. Test Remote Access
+From your client machine, run:
+```sh
+curl -X POST http://<REMOTE_IP>:11434/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{"model": "qwen2.5vl:7b", "prompt": "Describe the capabilities of this model.", "format": "json", "stream": false}'
+```
+
+You should receive a JSON response from the model.
+
+## Troubleshooting
+- If you get `Connection refused`, make sure Ollama is running and listening on `0.0.0.0:11434`.
+- If you get a timeout, check firewall rules on both the server and client side.
+- You can test locally on the server with:
+  ```sh
+  curl -X POST http://localhost:11434/api/generate ...
+  ```
+- If you want to restrict access, consider using a VPN or firewall rules to limit which IPs can connect.
