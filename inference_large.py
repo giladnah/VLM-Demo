@@ -1,8 +1,10 @@
 """Module for running inference using a large Vision Language Model via Ollama CLI."""
 
 import cv2
-import subprocess
+import requests
 import json
+import base64
+import time
 import tempfile
 import os
 from typing import List, Optional, Union, Dict, Any, TypeAlias
@@ -15,6 +17,9 @@ ImageFrame: TypeAlias = np.ndarray
 
 # Consistent with 'ollama pull qwen2.5vl:7b' in TASKS.md
 MODEL_NAME_DEFAULT_LARGE = "qwen2.5vl:7b"
+OLLAMA_URL_DEFAULT = "http://localhost:11434"
+MAX_RETRIES = 3
+RETRY_DELAY = 2  # seconds
 
 class LargeInferenceOutput(BaseModel):
     """Data model for the structured output of the large VLM inference."""
@@ -27,115 +32,120 @@ class OllamaError(Exception):
     pass # Re-using the same exception type as in inference_small for consistency
 
 def run_large_inference(
-    frames: Union[ImageFrame, List[ImageFrame]],
+    frame: ImageFrame,
     model_name: str = MODEL_NAME_DEFAULT_LARGE,
-    timeout_seconds: int = 90 # Larger models might take more time
+    timeout_seconds: int = 90,
+    ollama_url: str = OLLAMA_URL_DEFAULT,
+    retry_count: int = MAX_RETRIES,
+    max_image_size: int = 640,
+    jpeg_quality: int = 90,
+    retry_cooldown: int = 5,
+    reset_between_retries: bool = False
 ) -> Optional[LargeInferenceOutput]:
     """
-    Runs inference using a large VLM (via Ollama CLI) on a given image frame or list of frames.
-
-    If a list of frames is provided, the most recent frame (the last one in the list)
-    is used for inference. The function saves the selected frame to a temporary image file,
-    constructs a prompt for the Ollama model, executes the Ollama CLI, parses the JSON output,
-    and validates it against the LargeInferenceOutput model.
-
+    Runs inference using a large VLM (via Ollama REST API) on a given image frame.
     Args:
-        frames (Union[ImageFrame, List[ImageFrame]]):
-            A single image frame (NumPy array) or a list of image frames.
-            If a list, the last frame is processed.
-        model_name (str, optional):
-            The name of the Ollama large model to use.
-            Defaults to MODEL_NAME_DEFAULT_LARGE.
-        timeout_seconds (int, optional):
-            Timeout for the Ollama CLI command. Defaults to 90 seconds.
-
+        frame (ImageFrame): The image frame (NumPy array from OpenCV) to process.
+        model_name (str, optional): The name of the Ollama model to use.
+        timeout_seconds (int, optional): Timeout for the Ollama REST API call.
+        ollama_url (str, optional): The base URL for the Ollama server.
+        retry_count (int, optional): Number of retry attempts for transient errors.
+        max_image_size (int, optional): Maximum dimension (width or height) for resizing.
+        jpeg_quality (int, optional): JPEG encoding quality (0-100).
+        retry_cooldown (int, optional): Seconds to wait between retries to let server recover.
+        reset_between_retries (bool, optional): Not used for REST API, kept for interface compatibility.
     Returns:
-        Optional[LargeInferenceOutput]: A LargeInferenceOutput object if successful,
-                                      None if any error occurs or if input is invalid.
+        Optional[LargeInferenceOutput]: A LargeInferenceOutput object if successful, None if all retries fail.
     """
-    temp_image_path: Optional[str] = None
-    image_to_process: Optional[ImageFrame] = None
-
-    if isinstance(frames, list):
-        if not frames:
-            print("Error: Received an empty list of frames for large inference.")
-            return None
-        image_to_process = frames[-1] # Process the last frame (most recent)
-    elif isinstance(frames, np.ndarray):
-        image_to_process = frames
-    else:
-        print(f"Error: Invalid input type for frames. Expected np.ndarray or list, got {type(frames)}.")
-        return None
-
-    if image_to_process is None: # Should not happen if logic above is correct
-        print("Error: No image frame determined for processing in large inference.")
-        return None
-
-    try:
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_file: # Using PNG for potentially better quality
-            temp_image_path = tmp_file.name
-
-        if not cv2.imwrite(temp_image_path, image_to_process):
-            raise OllamaError(f"Failed to write temporary image to {temp_image_path} for large inference.")
-
-        prompt = (
-            f"Provide a detailed analysis of this image: <img>{temp_image_path}</img>. "
-            "Respond ONLY with a JSON object containing these keys: "
-            "'caption' (a descriptive sentence about the image), "
-            "'tags' (a list of relevant keywords or detected objects/attributes, max 10 tags), and "
-            "'detailed_analysis' (a concise textual description or notable insights about the scene, 2-3 sentences)."
-        )
-
-        command = ["ollama", "run", model_name, prompt, "--format", "json"]
-
-        process_result = subprocess.run(
-            command, capture_output=True, text=True, check=False, timeout=timeout_seconds
-        )
-
-        if process_result.returncode != 0:
-            error_message = (
-                f"Ollama CLI error (large model: {model_name}, returncode: {process_result.returncode}). "
-                f"Stderr: {process_result.stderr.strip() if process_result.stderr else 'N/A'}"
-            )
-            raise OllamaError(error_message)
-
+    for attempt in range(1, retry_count + 1):
         try:
-            output_json = json.loads(process_result.stdout.strip())
-        except json.JSONDecodeError as e:
-            error_message = (
-                f"Failed to decode JSON from Ollama (large model: {model_name}): {e}. "
-                f"Raw Output: '{process_result.stdout.strip()}'"
-            )
-            raise OllamaError(error_message) from e
+            # 1. Resize the image to reduce payload size while maintaining aspect ratio
+            h, w = frame.shape[:2]
+            original_size = f"{w}x{h}"
+            if max(h, w) > max_image_size:
+                scale = max_image_size / max(h, w)
+                new_w = int(w * scale)
+                new_h = int(h * scale)
+                frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            else:
+                new_w, new_h = w, h
 
-        try:
-            inference_result = LargeInferenceOutput(**output_json)
-            return inference_result
-        except ValidationError as e:
-            error_message = (
-                f"Ollama output validation error (large model: {model_name}): {e}. "
-                f"Received JSON: {output_json}"
-            )
-            raise OllamaError(error_message) from e
+            # 2. Encode the frame as JPEG in memory with specified quality
+            encode_params = [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality]
+            success, img_encoded = cv2.imencode('.jpg', frame, encode_params)
+            if not success:
+                raise OllamaError("Failed to encode image frame as JPEG.")
 
-    except subprocess.TimeoutExpired:
-        print(f"Error: Ollama CLI command timed out after {timeout_seconds}s (large model: {model_name})")
-        return None
-    except FileNotFoundError:
-        print("Error: Ollama CLI executable not found. Ensure Ollama is installed and in your system's PATH.")
-        raise
-    except OllamaError as e:
-        print(f"OllamaError (large inference): {e}")
-        return None
-    except Exception as e:
-        print(f"An unexpected error in run_large_inference (model: {model_name}): {type(e).__name__} - {e}")
-        return None
-    finally:
-        if temp_image_path and os.path.exists(temp_image_path):
+            image_bytes = img_encoded.tobytes()
+            image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+
+            # 3. Construct the prompt for the VLM
+            prompt = (
+                "Provide a detailed analysis of this image. "
+                "Respond ONLY with a JSON object containing these keys: "
+                "'caption' (a descriptive sentence about the image), "
+                "'tags' (a list of relevant keywords or detected objects/attributes, max 10 tags), and "
+                "'detailed_analysis' (a concise textual description or notable insights about the scene, 2-3 sentences)."
+            )
+
+            # 4. Prepare the payload with the base64-encoded image
+            payload = {
+                "model": model_name,
+                "prompt": prompt,
+                "images": [image_b64],
+                "format": "json",
+                "stream": False
+            }
+
+            print(f"[LargeInference] Sending request to Ollama API: {ollama_url}/api/generate (attempt {attempt}/{retry_count})")
+            start_time = time.time()
+
+            response = requests.post(
+                f"{ollama_url}/api/generate",
+                json=payload,
+                timeout=timeout_seconds
+            )
+
+            if response.status_code >= 500:
+                print(f"[LargeInference] Server error (status code {response.status_code}): {response.text}")
+                if attempt < retry_count:
+                    print(f"[LargeInference] Waiting {retry_cooldown} seconds before retry...")
+                    time.sleep(retry_cooldown)
+                    continue
+                else:
+                    print("[LargeInference] All retry attempts failed due to server errors")
+                    return None
+
+            response.raise_for_status()
+
+            elapsed_time = time.time() - start_time
+            print(f"[LargeInference] Request completed in {elapsed_time:.2f} seconds")
+
+            response_json = response.json()
+            generated_text = response_json.get("response", "")
+
             try:
-                os.remove(temp_image_path)
-            except Exception as e_remove:
-                print(f"Warning: Failed to remove temporary image file {temp_image_path} (large inference): {e_remove}")
+                output_json = json.loads(generated_text)
+            except json.JSONDecodeError as e:
+                print(f"[LargeInference] Failed to decode JSON from Ollama REST API (model: {model_name}): {e}. Raw Output: '{generated_text}'")
+                return None
+
+            try:
+                inference_result = LargeInferenceOutput(**output_json)
+                return inference_result
+            except ValidationError as e:
+                print(f"[LargeInference] Ollama output validation error (large model: {model_name}): {e}. Received JSON: {output_json}")
+                return None
+
+        except Exception as e:
+            print(f"[LargeInference] Unexpected error: {type(e).__name__} - {e}")
+            if attempt < retry_count:
+                print(f"[LargeInference] Waiting {retry_cooldown} seconds before retry...")
+                time.sleep(retry_cooldown)
+                continue
+            else:
+                return None
+    return None
 
 if __name__ == '__main__':
     print(f"--- Testing run_large_inference with model: {MODEL_NAME_DEFAULT_LARGE} ---")

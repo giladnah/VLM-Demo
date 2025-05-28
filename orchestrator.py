@@ -2,36 +2,33 @@
 
 import time
 import threading
-from typing import Optional, List # Required for List type hint if used explicitly
-import os  # Fix linter error for os
-import subprocess  # Fix linter error for subprocess
+from typing import Optional, List
+import os
+import subprocess
+import cv2
 
-# Assuming ImageFrame type is consistent (np.ndarray)
 from video_source import get_video_stream, extract_i_frame, VideoStream, ImageFrame
 from buffer import init_frame_buffer, update_buffer, FrameBuffer
 from inference_small import run_small_inference
 from trigger import evaluate_trigger
 from inference_large import run_large_inference, LargeInferenceOutput
 
-# Constants based on PLANNING.md or derived for the orchestration logic
 IFRAME_INTERVAL_SECONDS = 2.0
-BUFFER_SIZE = 10 # As per PLANNING.md: "rolling buffer of 10 I-frames"
-FRAME_GRAB_INTERVAL = 1/30  # 30 FPS (adjust as needed)
+BUFFER_SIZE = 10
+FRAME_GRAB_INTERVAL = 1/30
 
 class OrchestrationConfig:
     """Configuration for an orchestration task, allowing dynamic updates."""
     def __init__(self, source_uri: str, initial_trigger_description: str):
-        self.source_uri = source_uri # Typically set once at the start
+        self.source_uri = source_uri
         self._trigger_description = initial_trigger_description
-        self._lock = threading.Lock() # To protect access to trigger_description
+        self._lock = threading.Lock()
 
     def get_trigger_description(self) -> str:
-        """Returns the current trigger description in a thread-safe manner."""
         with self._lock:
             return self._trigger_description
 
     def set_trigger_description(self, new_description: str) -> None:
-        """Updates the trigger description in a thread-safe manner."""
         with self._lock:
             if self._trigger_description != new_description:
                 self._trigger_description = new_description
@@ -39,103 +36,189 @@ class OrchestrationConfig:
             else:
                 print(f"[OrchestrationConfig] INFO: Trigger description is already '{new_description}'. No change made.")
 
-def frame_grabber(video_stream, frame_buffer, buffer_lock, stop_event):
-    """
-    Continuously reads frames from the video stream and fills the buffer in real time.
-    """
-    print("[FrameGrabber] INFO: Starting frame grabber thread.")
-    while not stop_event.is_set():
-        ret, frame = video_stream.read()
-        if not ret:
-            print("[FrameGrabber] INFO: End of stream or failed to read frame.")
-            break
-        with buffer_lock:
-            frame_buffer.append(frame)
-        time.sleep(FRAME_GRAB_INTERVAL)
-    print("[FrameGrabber] INFO: Frame grabber thread exiting.")
+class Orchestrator:
+    """Singleton orchestrator for video processing pipeline."""
+    def __init__(self):
+        self.latest_small_inference_frame_path = "latest_small_inference.jpg"
+        self.latest_small_inference_lock = threading.Lock()
+        self.latest_small_inference_result = None
+        self.latest_small_inference_result_str = None
+        self.latest_small_inference_result_lock = threading.Lock()
+        self.latest_large_inference_result = None
+        self.latest_large_inference_result_lock = threading.Lock()
+        self.new_small_result_available = False
+        self.new_large_result_available = False
+        self.result_status_lock = threading.Lock()
+        self._processing_thread = None
+        self._stop_event = None
+        self._config = None
+        self._buffer_lock = threading.Lock()
+        self._frame_buffer = None
+        self._video_stream = None
 
-def orchestrate_processing(
-    config: OrchestrationConfig,
-    stop_event: Optional[threading.Event] = None
-) -> None:
-    """
-    Coordinates the video processing pipeline with real-time frame grabbing.
-    """
-    video_stream: Optional[VideoStream] = None
-    buffer_lock = threading.Lock()
-    try:
-        source_uri = config.source_uri
-        print(f"[Orchestrator] INFO: Attempting to connect to video source: {source_uri}")
-        video_stream = get_video_stream(source_uri)
-        print(f"[Orchestrator] INFO: Successfully connected to video source. FPS: {video_stream.get_fps()}")
+    def start(self, config: OrchestrationConfig):
+        self.stop()  # Stop any existing orchestration
+        self._config = config
+        self._stop_event = threading.Event()
+        self._processing_thread = threading.Thread(target=self._orchestrate_processing, daemon=True)
+        self._processing_thread.start()
 
-        frame_buffer: FrameBuffer = init_frame_buffer(size=BUFFER_SIZE)
-        print(f"[Orchestrator] INFO: Initialized frame buffer with size {BUFFER_SIZE}.")
+    def stop(self):
+        if self._stop_event is not None:
+            self._stop_event.set()
+        if self._processing_thread is not None:
+            self._processing_thread.join(timeout=5)
+        self._processing_thread = None
+        self._stop_event = None
+        if self._video_stream:
+            self._video_stream.release()
+            self._video_stream = None
 
-        # Start frame grabber thread
-        grabber_stop_event = stop_event or threading.Event()
-        grabber_thread = threading.Thread(target=frame_grabber, args=(video_stream, frame_buffer, buffer_lock, grabber_stop_event), daemon=True)
-        grabber_thread.start()
-
-        last_processed_time = time.time() - IFRAME_INTERVAL_SECONDS
-
-        while True:
-            if stop_event and stop_event.is_set():
-                print("[Orchestrator] INFO: Stop event received, terminating processing loop.")
+    def _frame_grabber(self, video_stream, frame_buffer, buffer_lock, stop_event):
+        print("[FrameGrabber] INFO: Starting frame grabber thread.")
+        while not stop_event.is_set():
+            ret, frame = video_stream.read()
+            if not ret:
+                print("[FrameGrabber] INFO: End of stream or failed to read frame.")
                 break
+            with buffer_lock:
+                frame_buffer.append(frame)
+            time.sleep(FRAME_GRAB_INTERVAL)
+        print("[FrameGrabber] INFO: Frame grabber thread exiting.")
 
-            current_trigger_description = config.get_trigger_description()
-            current_time = time.time()
-            elapsed_since_last_process = current_time - last_processed_time
+    def _orchestrate_processing(self):
+        try:
+            source_uri = self._config.source_uri
+            print(f"[Orchestrator] INFO: Attempting to connect to video source: {source_uri}")
+            self._video_stream = get_video_stream(source_uri)
+            print(f"[Orchestrator] INFO: Successfully connected to video source. FPS: {self._video_stream.get_fps()}")
 
-            if elapsed_since_last_process >= IFRAME_INTERVAL_SECONDS:
-                last_processed_time = current_time
-                print(f"[Orchestrator] DEBUG: Cycle start at {time.strftime('%Y-%m-%d %H:%M:%S')}. Trigger: '{current_trigger_description}'.")
+            self._frame_buffer = init_frame_buffer(size=BUFFER_SIZE)
+            print(f"[Orchestrator] INFO: Initialized frame buffer with size {BUFFER_SIZE}.")
 
-                # Get the latest frame from the buffer
-                with buffer_lock:
-                    if frame_buffer:
-                        current_frame = frame_buffer[-1]
-                    else:
-                        current_frame = None
+            grabber_thread = threading.Thread(
+                target=self._frame_grabber,
+                args=(self._video_stream, self._frame_buffer, self._buffer_lock, self._stop_event),
+                daemon=True
+            )
+            grabber_thread.start()
 
-                if current_frame is None:
-                    print("[Orchestrator] INFO: No frames in buffer. Waiting for frames.")
-                    time.sleep(0.1)
-                    continue
+            last_processed_time = time.time() - IFRAME_INTERVAL_SECONDS
 
-                print(f"[Orchestrator] DEBUG: Using latest frame from buffer. Shape: {current_frame.shape}")
+            while True:
+                if self._stop_event and self._stop_event.is_set():
+                    print("[Orchestrator] INFO: Stop event received, terminating processing loop.")
+                    break
 
-                print(f"[Orchestrator] INFO: Running small inference for trigger: '{current_trigger_description}'")
-                small_inference_out: Optional[str] = run_small_inference(current_frame, current_trigger_description)
+                current_trigger_description = self._config.get_trigger_description()
+                current_time = time.time()
+                elapsed_since_last_process = current_time - last_processed_time
 
-                if small_inference_out:
-                    print(f"[Orchestrator] INFO: Small inference result - Result: {small_inference_out}")
-                    if small_inference_out == "yes":
-                        print("[Orchestrator] INFO: Trigger MET. Running large inference.")
-                        large_inference_out: Optional[LargeInferenceOutput] = run_large_inference(current_frame)
-                        if large_inference_out:
-                            print(f"[Orchestrator] INFO: Large inference result - Caption: '{large_inference_out.caption}', Tags: {large_inference_out.tags}, Analysis: '{large_inference_out.detailed_analysis[:100]}...'")
+                if elapsed_since_last_process >= IFRAME_INTERVAL_SECONDS:
+                    last_processed_time = current_time
+                    print(f"[Orchestrator] DEBUG: Cycle start at {time.strftime('%Y-%m-%d %H:%M:%S')}. Trigger: '{current_trigger_description}'.")
+
+                    with self._buffer_lock:
+                        if self._frame_buffer:
+                            current_frame = self._frame_buffer[-1]
                         else:
-                            print("[Orchestrator] WARN: Large inference failed or returned no result.")
-                else:
-                    print("[Orchestrator] WARN: Small inference failed or returned no result.")
-            else:
-                time.sleep(0.05)
+                            current_frame = None
 
-    except ValueError as ve:
-        print(f"[Orchestrator] ERROR: Configuration or source error - {ve}. Terminating.")
-    except FileNotFoundError as fnfe:
-        print(f"[Orchestrator] CRITICAL: Ollama CLI not found - {fnfe}. Ensure Ollama is installed and in PATH. Terminating.")
-    except Exception as e:
-        import traceback
-        print(f"[Orchestrator] CRITICAL: An unexpected error occurred: {type(e).__name__} - {e}")
-        print(f"[Orchestrator] Traceback: {traceback.format_exc()}")
-    finally:
-        if video_stream:
-            print("[Orchestrator] INFO: Releasing video stream.")
-            video_stream.release()
-        print("[Orchestrator] INFO: Processing finished.")
+                    if current_frame is None:
+                        print("[Orchestrator] INFO: No frames in buffer. Waiting for frames.")
+                        time.sleep(0.1)
+                        continue
+
+                    print(f"[Orchestrator] DEBUG: Using latest frame from buffer. Shape: {current_frame.shape}")
+
+                    with self.latest_small_inference_lock:
+                        cv2.imwrite(self.latest_small_inference_frame_path, current_frame)
+
+                    print(f"[Orchestrator] INFO: Running small inference for trigger: '{current_trigger_description}' using model: {self._config.small_model_name} at {self._config.small_ollama_server}")
+                    small_inference_out: Optional[str] = run_small_inference(
+                        current_frame,
+                        current_trigger_description,
+                        model_name=self._config.small_model_name,
+                        ollama_url=self._config.small_ollama_server
+                    )
+
+                    if small_inference_out:
+                        print(f"[Orchestrator] INFO: Small inference result - Result: {small_inference_out}")
+                        with self.latest_small_inference_result_lock:
+                            self.latest_small_inference_result = {
+                                "result": small_inference_out,
+                                "timestamp": time.time()
+                            }
+                            self.latest_small_inference_result_str = f"[Orchestrator] INFO: Small inference result - Result: {small_inference_out}"
+                        with self.result_status_lock:
+                            self.new_small_result_available = True
+                        if small_inference_out == "yes":
+                            print(f"[Orchestrator] INFO: Trigger MET. Running large inference using model: {self._config.large_model_name} at {self._config.large_ollama_server}")
+                            large_inference_out: Optional[LargeInferenceOutput] = run_large_inference(
+                                current_frame,
+                                model_name=self._config.large_model_name,
+                                ollama_url=self._config.large_ollama_server
+                            )
+                            if large_inference_out:
+                                print(f"[Orchestrator] INFO: Large inference result - Caption: '{large_inference_out.caption}', Tags: {large_inference_out.tags}, Analysis: '{large_inference_out.detailed_analysis[:100]}...'")
+                                with self.latest_large_inference_result_lock:
+                                    self.latest_large_inference_result = large_inference_out.dict()
+                                with self.result_status_lock:
+                                    self.new_large_result_available = True
+                            else:
+                                print("[Orchestrator] WARN: Large inference failed or returned no result.")
+                    else:
+                        print("[Orchestrator] WARN: Small inference failed or returned no result.")
+                else:
+                    time.sleep(0.05)
+
+        except ValueError as ve:
+            print(f"[Orchestrator] ERROR: Configuration or source error - {ve}. Terminating.")
+        except FileNotFoundError as fnfe:
+            print(f"[Orchestrator] CRITICAL: Ollama CLI not found - {fnfe}. Ensure Ollama is installed and in PATH. Terminating.")
+        except Exception as e:
+            import traceback
+            print(f"[Orchestrator] CRITICAL: An unexpected error occurred: {type(e).__name__} - {e}")
+            print(f"[Orchestrator] Traceback: {traceback.format_exc()}")
+        finally:
+            if self._video_stream:
+                print("[Orchestrator] INFO: Releasing video stream.")
+                self._video_stream.release()
+                self._video_stream = None
+            print("[Orchestrator] INFO: Processing finished.")
+
+    def get_latest_small_inference_frame_path(self):
+        return self.latest_small_inference_frame_path
+
+    def get_latest_small_inference_result(self, clear_status: bool = True):
+        with self.latest_small_inference_result_lock:
+            result = self.latest_small_inference_result
+        if clear_status:
+            with self.result_status_lock:
+                self.new_small_result_available = False
+        return result
+
+    def get_latest_small_inference_result_str(self):
+        with self.latest_small_inference_result_lock:
+            return self.latest_small_inference_result_str
+
+    def get_latest_large_inference_result(self, clear_status: bool = True):
+        with self.latest_large_inference_result_lock:
+            result = self.latest_large_inference_result
+        if clear_status:
+            with self.result_status_lock:
+                self.new_large_result_available = False
+        return result
+
+    def get_results_status(self):
+        with self.result_status_lock:
+            return {
+                "small": self.new_small_result_available,
+                "large": self.new_large_result_available
+            }
+
+# Singleton instance
+orchestrator = Orchestrator()
 
 if __name__ == '__main__':
     # This example demonstrates running the orchestrator in a background thread.
@@ -169,7 +252,7 @@ if __name__ == '__main__':
 
     def orchestration_target():
         print(f"[Orchestrator Thread] INFO: Starting orchestrate_processing with source '{config.source_uri}' and initial trigger '{config.get_trigger_description()}'.")
-        orchestrate_processing(config, stop_processing_event) # Pass the config object
+        orchestrator.start(config) # Pass the config object
         print("[Orchestrator Thread] INFO: orchestrate_processing has finished.")
 
     processing_thread = threading.Thread(target=orchestration_target, daemon=True)
