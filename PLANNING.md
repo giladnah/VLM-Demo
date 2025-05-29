@@ -72,7 +72,7 @@ This document defines the detailed implementation specification for Cursor to bu
 4. **Small Model Inference** (*Stage 1*)
 
    * Endpoint: `run_small_inference(frame, trigger_description)`
-   * Input: latest I-frame and user-defined trigger description (e.g., “a dog sitting on the couch”).
+   * Input: latest I-frame and user-defined trigger description (e.g., "a dog sitting on the couch").
    * Output: detection result boolean and labels.
 5. **Trigger Logic**
 
@@ -155,4 +155,13 @@ def orchestrate_processing(source_uri: str, trigger: str): ...
 
   * Update README to reflect new modules and flow.
   * Provide sequence diagrams illustrating application flow.
+
+## RTSP Camera Selection Architecture
+
+- RTSP cameras are defined in `config.yaml` under the `rtsp_cameras` key.
+- The FastAPI backend exposes a `/rtsp-cameras` endpoint that returns this list.
+- The Gradio UI fetches the RTSP camera list from the backend at startup and uses it to populate the video source dropdown.
+- Any changes to `config.yaml` (with backend restart) are reflected in the UI.
+- No UI editing of RTSP cameras; selection is from config only.
+- Pushing to remote is now only done with explicit user request.
 
