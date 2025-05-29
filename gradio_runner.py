@@ -6,6 +6,7 @@ import os
 from PIL import Image
 from io import BytesIO
 import glob
+from datetime import datetime
 from config import get_config
 
 CONFIG = get_config()
@@ -16,21 +17,53 @@ class VLMGradioApp:
     def __init__(self):
         self.display_logs = []
         self.display_logs_lock = threading.Lock()
+        self.rtsp_cameras = self.fetch_rtsp_cameras()
         self.video_device_choices = self.get_video_device_choices()
         self.poll_thread = threading.Thread(target=self.poll_results, daemon=True)
         self.poll_thread.start()
         self.last_frame = None
+
+    def fetch_rtsp_cameras(self):
+        try:
+            resp = requests.get(f"{API_URL}/rtsp-cameras", timeout=3)
+            if resp.ok:
+                return resp.json()
+        except Exception:
+            pass
+        return []
 
     def get_video_device_choices(self):
         devices = sorted(glob.glob("/dev/video*"))
         choices = ["Upload Video"]
         for dev in devices:
             choices.append(f"Webcam: {dev}")
+        # Add RTSP cameras from config
+        for cam in self.rtsp_cameras:
+            choices.append(f"RTSP: {cam['name']}")
         return choices
+
+    def get_rtsp_url_by_name(self, name):
+        for cam in self.rtsp_cameras:
+            if cam['name'] == name:
+                # Build RTSP URL with credentials if provided
+                addr = cam['address']
+                user = cam.get('username', '')
+                pwd = cam.get('password', '')
+                if user and pwd:
+                    # Insert credentials into the URL
+                    prefix, rest = addr.split('://', 1)
+                    return f"{prefix}://{user}:{pwd}@{rest}"
+                return addr
+        return None
 
     def start_orchestration(self, source_type, video_file, trigger):
         if source_type.startswith("Webcam: "):
             video_path = source_type.replace("Webcam: ", "")
+        elif source_type.startswith("RTSP: "):
+            cam_name = source_type.replace("RTSP: ", "")
+            video_path = self.get_rtsp_url_by_name(cam_name)
+            if not video_path:
+                return f"RTSP camera '{cam_name}' not found in config.", "\n".join(self.display_logs)
         else:
             if video_file is None:
                 return "Please upload a video file.", "\n".join(self.display_logs)
@@ -52,16 +85,19 @@ class VLMGradioApp:
             resp = requests.post(f"{API_URL}/start", json=payload)
             if resp.ok:
                 msg = resp.json().get("message", "Started.")
+                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 with self.display_logs_lock:
-                    self.display_logs.append(f"[START] {msg}")
+                    self.display_logs.append(f"[{timestamp}] [START] {msg}")
                 return msg, "\n".join(self.display_logs)
             else:
+                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 with self.display_logs_lock:
-                    self.display_logs.append(f"[START][ERROR] {resp.text}")
+                    self.display_logs.append(f"[{timestamp}] [START][ERROR] {resp.text}")
                 return f"Error: {resp.text}", "\n".join(self.display_logs)
         except Exception as e:
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             with self.display_logs_lock:
-                self.display_logs.append(f"[START][EXCEPTION] {e}")
+                self.display_logs.append(f"[{timestamp}] [START][EXCEPTION] {e}")
             return f"Exception: {e}", "\n".join(self.display_logs)
 
     def update_trigger(self, trigger):
@@ -69,16 +105,19 @@ class VLMGradioApp:
             resp = requests.put(f"{API_URL}/trigger", json={"trigger": trigger})
             if resp.ok:
                 msg = resp.json().get("message", "Trigger updated.")
+                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 with self.display_logs_lock:
-                    self.display_logs.append(f"[TRIGGER] {msg}")
+                    self.display_logs.append(f"[{timestamp}] [TRIGGER] {msg}")
                 return msg
             else:
+                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 with self.display_logs_lock:
-                    self.display_logs.append(f"[TRIGGER][ERROR] {resp.text}")
+                    self.display_logs.append(f"[{timestamp}] [TRIGGER][ERROR] {resp.text}")
                 return f"Error: {resp.text}"
         except Exception as e:
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             with self.display_logs_lock:
-                self.display_logs.append(f"[TRIGGER][EXCEPTION] {e}")
+                self.display_logs.append(f"[{timestamp}] [TRIGGER][EXCEPTION] {e}")
             return f"Exception: {e}"
 
     def infer_large(self, image_file):
@@ -158,7 +197,8 @@ class VLMGradioApp:
             self.last_frame = self.fetch_latest_small_inference_frame()
             result = self.fetch_latest_small_inference_result()
             if result and result.get("result") is not None:
-                new_log = f"[SMALL INFERENCE RESULT] {result}"
+                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                new_log = f"[{timestamp}] [SMALL INFERENCE RESULT] {result}"
                 new_logs.append(new_log)
         if status.get("large"):
             result = self.fetch_latest_large_inference_result()
@@ -167,7 +207,8 @@ class VLMGradioApp:
                 caption = result.get("caption", "")
                 tags = result.get("tags", "")
                 analysis = result.get("detailed_analysis", "")
-                new_log = f"[LARGE INFERENCE RESULT] Caption: {caption}, Tags: {tags}, Analysis: {analysis[:80]}..."
+                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                new_log = f"[{timestamp}] [LARGE INFERENCE RESULT] Caption: {caption}, Tags: {tags}, Analysis: {analysis[:80]}..."
                 new_logs.append(new_log)
         with self.display_logs_lock:
             for log in new_logs:

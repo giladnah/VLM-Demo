@@ -381,6 +381,11 @@ def get_latest_small_inference_result():
 def get_latest_large_inference_result():
     return orchestrator.get_latest_large_inference_result(clear_status=True) or {}
 
+@app.get("/rtsp-cameras", tags=["Config"], summary="Get the list of RTSP cameras from config.yaml.")
+def get_rtsp_cameras():
+    """Returns the list of RTSP cameras as defined in config.yaml."""
+    return CONFIG.get('rtsp_cameras', [])
+
 if __name__ == "__main__":
     import uvicorn
     print("Starting VLM Camera Service API with Uvicorn...")
