@@ -35,6 +35,8 @@ This project implements a Vision Language Model (VLM) powered camera application
 ├── TASKS.md                # Project task tracking
 ├── PLANNING.md             # (Assumed, as per instructions) Project planning details
 ├── requirements.txt        # Python dependencies (to be generated)
+├── config.yaml             # Main configuration file for models, servers, triggers
+├── gradio_runner.py        # Gradio UI application
 ├── venv/                   # Python virtual environment
 └── tests/                  # Pytest unit tests
     ├── test_orchestrator.py
@@ -64,15 +66,72 @@ Refer to `TASKS.md` for detailed initial setup steps, including:
 
 ## Running the Application
 
-1.  **Ensure Ollama Service is Running**:
+1.  **Ensure Ollama Service is Running:**
     *   Start the Ollama service (e.g., `sudo systemctl start ollama` on Linux, or run the Ollama desktop application).
-2.  **Activate Virtual Environment**:
+2.  **Activate Virtual Environment:**
     *   `source venv/bin/activate`
-3.  **Start the FastAPI Server**:
+3.  **Start the FastAPI Server:**
     *   `python app.py`
     *   Or using Uvicorn directly for more options: `uvicorn app:app --host 0.0.0.0 --port 8000 --reload`
     *   The API will typically be available at `http://localhost:8000`.
     *   Check the `/health` endpoint (`http://localhost:8000/health`) to verify service and model status.
+
+### Launching the Gradio UI
+
+A user-friendly Gradio web interface is available for interacting with the VLM Camera Application. The Gradio app allows you to:
+
+- Select a video source (webcam or upload a video file)
+- Enter or update trigger descriptions
+- Start/stop orchestration and monitor status
+- View logs and the latest inference results (including images and text)
+- Run large model inference on uploaded images
+
+**To launch the Gradio app:**
+
+1. **Activate your virtual environment:**
+    ```sh
+    source venv/bin/activate
+    ```
+2. **Start the Gradio UI:**
+    ```sh
+    python gradio_runner.py
+    ```
+3. **Access the UI:**
+    - Open your browser and go to the address shown in the terminal (typically `http://localhost:7860`).
+
+The Gradio app communicates with the FastAPI backend and uses the settings from `config.yaml`.
+
+### Configuration: `config.yaml`
+
+The application is configured via a single YAML file, `config.yaml`, located in the project root. This file controls model selection, server addresses, and default triggers for inference.
+
+Example structure:
+
+```yaml
+small_model:
+  name: qwen2.5vl:3b
+  ollama_server: http://localhost:11434
+large_model:
+  name: qwen2.5vl:7b
+  ollama_server: http://10.41.74.178:11434
+server_ips:
+  backend: "http://localhost:8000"
+  gradio: "http://localhost:7860"
+default_triggers:
+  - "a person falling down"
+  - "a blue car"
+  - "a test pattern"
+```
+
+- **small_model / large_model**: Specify the model name and the Ollama server endpoint for each model. You can point the large model to a remote server if needed.
+- **server_ips**: Set the backend (FastAPI) and Gradio UI addresses. These are used for internal communication.
+- **default_triggers**: List of default trigger descriptions available in the UI.
+
+**To customize:**
+- Change model names or server addresses as needed for your deployment.
+- Add or modify triggers to suit your use case.
+
+The Gradio app and backend both read from this file at startup.
 
 ## Running Tests
 
