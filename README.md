@@ -214,3 +214,28 @@ You should receive a JSON response from the model.
   curl -X POST http://localhost:11434/api/generate ...
   ```
 - If you want to restrict access, consider using a VPN or firewall rules to limit which IPs can connect.
+
+
+# Hailo Inference
+It is built around the qwen-VL demo, https://hailotech.atlassian.net/wiki/spaces/CS/pages/2204664099/QWEN2-VL-2B+Demo+Installation
+
+To work with Hailo inference, you need to install the raw connection library from the qwen-VL demo in this venv (copy to venv/lib/python3.10/site-packages/)
+You'll need to setup the  HAILO_CONNECTION_PCIE_PORT environment variable to point to the Hailo device.
+
+```sh
+export HAILO_CONNECTION_PCIE_PORT=123
+```
+
+copy the hefs_and_embeddings directory from the qwen-VL demo to the project root.
+for example:
+```sh
+cp -r /home/giladn/tappas_apps/repos/QWEN2-2B_VL_Demo/hefs_and_embeddings .
+```
+
+The server side on the H10 should be running according to the instructions in the qwen-VL demo.
+
+You can test the inference by running the test_inference_small_hailo.py script.
+
+```sh
+python test_inference_small_hailo.py --image test_examples/test_image.jpg --trigger "a person has fallen"
+```

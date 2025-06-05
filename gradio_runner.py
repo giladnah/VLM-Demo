@@ -22,6 +22,7 @@ class VLMGradioApp:
         self.poll_thread = threading.Thread(target=self.poll_results, daemon=True)
         self.poll_thread.start()
         self.last_frame = None
+        self.last_status_md_content = "<span style='color: gray; font-size: 1.5em; font-weight: bold;'>...</span>"
 
     def fetch_rtsp_cameras(self):
         try:
@@ -193,10 +194,14 @@ class VLMGradioApp:
     def refresh_small_frame_auto(self):
         status = self.fetch_results_status()
         new_logs = []
+        status_md_content = self.last_status_md_content
+        small_result = None
+        large_result = None
         if status.get("small"):
             self.last_frame = self.fetch_latest_small_inference_frame()
             result = self.fetch_latest_small_inference_result()
             if result and result.get("result") is not None:
+                small_result = result["result"]
                 timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 new_log = f"[{timestamp}] [SMALL INFERENCE RESULT]:  {result['result']}"
                 new_logs.append(new_log)
@@ -204,18 +209,36 @@ class VLMGradioApp:
             result = self.fetch_latest_large_inference_result()
             print("DEBUG: Large inference result from backend:", result)
             if result:
-                result_val = result.get("result", "")
+                large_result = result.get("result", "")
                 analysis = result.get("detailed_analysis", "")
                 timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                new_log = f"[{timestamp}] [LARGE INFERENCE RESULT] Result: {result_val}, Analysis: {analysis[:80]}..."
+                new_log = f"[{timestamp}] [LARGE INFERENCE RESULT] Result: {large_result}, Analysis: {analysis}"
                 new_logs.append(new_log)
+        # Status logic
+        new_status_md_content = status_md_content
+        if large_result == "yes":
+            new_status_md_content = ("<div style='display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 180px;'>"
+                                    "<span style='color: red; font-size: 4em; font-weight: bold; text-align: center;'>Alarm</span>"
+                                    "</div>")
+        elif small_result == "yes":
+            new_status_md_content = ("<div style='display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 180px;'>"
+                                    "<span style='color: orange; font-size: 4em; font-weight: bold; text-align: center;'>Alert</span>"
+                                    "</div>")
+        elif small_result == "no" or large_result == "no":
+            new_status_md_content = ("<div style='display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 180px;'>"
+                                    "<span style='color: green; font-size: 4em; font-weight: bold; text-align: center;'>OK</span>"
+                                    "</div>")
+        # Only update if changed
+        if new_status_md_content != self.last_status_md_content:
+            self.last_status_md_content = new_status_md_content
+        status_md_content = self.last_status_md_content
         with self.display_logs_lock:
             for log in new_logs:
                 if not self.display_logs or self.display_logs[-1] != log:
                     self.display_logs.append(log)
             self.display_logs = self.display_logs[-10:]
             logs_str = "\n".join(self.display_logs)
-        return self.last_frame, logs_str
+        return self.last_frame, status_md_content, logs_str
 
     def on_start(self, src_type, video, trig):
         msg, logs_str = self.start_orchestration(src_type, video, trig)
@@ -254,20 +277,24 @@ class VLMGradioApp:
                     update_btn = gr.Button("Update Trigger")
                     video_input = gr.Video(label="Upload Video File")
                 with gr.Column(scale=2):
-                    gr.Markdown("### Latest Small Inference Frame (Auto-Refresh)")
-                    latest_small_frame = gr.Image(label="Latest Small Inference Frame")
-                    status = gr.Textbox(label="Status", interactive=False)
+                    gr.Markdown("### Current Inference Frame (Auto-Refresh)")
+                    with gr.Row():
+                        with gr.Column(scale=1):
+                            latest_small_frame = gr.Image(interactive=False, show_label=False, container=False,show_download_button=False,
+                        show_fullscreen_button=False)
+                        with gr.Column(scale=1):
+                            status_md = gr.Markdown(label="Status")
                     logs = gr.Textbox(label="Logs", lines=10, interactive=False)
 
-            start_btn.click(self.on_start, inputs=[source_type, video_input, trigger], outputs=[status, logs])
-            update_btn.click(self.on_update, inputs=[trigger], outputs=[status, logs])
+            start_btn.click(self.on_start, inputs=[source_type, video_input, trigger], outputs=[status_md, logs])
+            update_btn.click(self.on_update, inputs=[trigger], outputs=[status_md, logs])
             logs.change(fn=self.update_logs, outputs=logs)
 
             timer = gr.Timer(value=1)
             timer.tick(
                 fn=self.refresh_small_frame_auto,
                 inputs=[],
-                outputs=[latest_small_frame, logs],
+                outputs=[latest_small_frame, status_md, logs],
             )
         return demo
 

@@ -7,6 +7,13 @@ import base64
 import time
 from typing import List, Optional, TypeAlias, Dict, Any
 import logging
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    import inference_small_hailo
+except ImportError:
+    inference_small_hailo = None
 
 import numpy as np
 from pydantic import BaseModel, Field, ValidationError
@@ -80,6 +87,7 @@ def run_small_inference(
 ) -> Optional[str]:
     """
     Runs inference using a small VLM (via Ollama REST API) on a given image frame.
+    If ollama_url == 'hailo', delegates to inference_small_hailo.run_small_inference.
 
     This function encodes the image as base64, sends it to the Ollama REST API,
     collects the response, and parses the JSON result. It includes
@@ -109,6 +117,15 @@ def run_small_inference(
     Returns:
         Optional[str]: 'yes' if the trigger is present, 'no' if not, or None if all retries fail.
     """
+    if ollama_url == "hailo":
+        if inference_small_hailo is None:
+            logger.error("inference_small_hailo module not found, cannot run on Hailo backend.")
+            return None
+        return inference_small_hailo.run_small_inference(
+            frame=frame,
+            trigger_description=trigger_description
+        )
+
     for attempt in range(1, retry_count + 1):
         try:
             # 1. Resize the image to reduce payload size while maintaining aspect ratio
