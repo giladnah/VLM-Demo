@@ -6,6 +6,8 @@ from typing import Optional, List
 import os
 import subprocess
 import cv2
+import queue
+import multiprocessing
 
 from video_source import get_video_stream, extract_i_frame, VideoStream, ImageFrame
 from buffer import init_frame_buffer, update_buffer, FrameBuffer
@@ -13,9 +15,9 @@ from inference_small import run_small_inference
 from trigger import evaluate_trigger
 from inference_large import run_large_inference, LargeInferenceOutput
 
-IFRAME_INTERVAL_SECONDS = 2.0
 BUFFER_SIZE = 10
 FRAME_GRAB_INTERVAL = 1/30
+BUFFER_GRAB_INTERVAL = 1/5  # Example: update buffer every 0.2s (5 FPS), adjust as needed
 
 class OrchestrationConfig:
     """Configuration for an orchestration task, allowing dynamic updates."""
@@ -36,6 +38,44 @@ class OrchestrationConfig:
             else:
                 print(f"[OrchestrationConfig] INFO: Trigger description is already '{new_description}'. No change made.")
 
+# --- Top-level inference worker process for multiprocessing ---
+def inference_worker_process(input_queue, output_queue, stop_event, config):
+    import time
+    from inference_small import run_small_inference
+    from inference_large import run_large_inference, LargeInferenceOutput
+    while not stop_event.is_set():
+        try:
+            frame, trigger_description, timestamp = input_queue.get(timeout=1)
+        except Exception:
+            continue
+        # Run small inference
+        print(f"[Orchestrator] [InferenceProcess] Running small inference for trigger: '{trigger_description}' using model: {config['small_model_name']} at {config['small_ollama_server']}")
+        small_inference_out: Optional[str] = run_small_inference(
+            frame,
+            trigger_description,
+            model_name=config["small_model_name"],
+            ollama_url=config["small_ollama_server"]
+        )
+        result_payload = {
+            "result": small_inference_out,
+            "timestamp": time.time(),
+            "frame": frame,
+            "trigger": trigger_description
+        }
+        if small_inference_out == "yes":
+            print(f"[Orchestrator] [InferenceProcess] Trigger MET. Running large inference using model: {config['large_model_name']} at {config['large_ollama_server']}")
+            large_inference_out: Optional[LargeInferenceOutput] = run_large_inference(
+                frame,
+                trigger_description,
+                model_name=config["large_model_name"],
+                ollama_url=config["large_ollama_server"]
+            )
+            if large_inference_out:
+                print(f"[Orchestrator] [InferenceProcess] Large inference result - Result: '{large_inference_out.result}', Analysis: '{large_inference_out.detailed_analysis[:100]}...'")
+                result_payload["large_inference"] = large_inference_out.dict()
+        output_queue.put(result_payload)
+    print("[Orchestrator] [InferenceProcess] Exiting.")
+
 class Orchestrator:
     """Singleton orchestrator for video processing pipeline."""
     def __init__(self):
@@ -55,34 +95,73 @@ class Orchestrator:
         self._buffer_lock = threading.Lock()
         self._frame_buffer = None
         self._video_stream = None
+        self._inference_process = None
+        self._inference_stop_event = None
+        self._inference_input_queue = None
+        self._inference_output_queue = None
+        self.current_frame = None
+        self.current_frame_lock = threading.Lock()
 
     def start(self, config: OrchestrationConfig):
         self.stop()  # Stop any existing orchestration
         self._config = config
         self._stop_event = threading.Event()
+        self._inference_stop_event = multiprocessing.Event()
+        self._inference_input_queue = multiprocessing.Queue(maxsize=2)
+        self._inference_output_queue = multiprocessing.Queue(maxsize=2)
         self._processing_thread = threading.Thread(target=self._orchestrate_processing, daemon=True)
+        config_dict = {
+            "small_model_name": getattr(config, "small_model_name", None),
+            "small_ollama_server": getattr(config, "small_ollama_server", None),
+            "large_model_name": getattr(config, "large_model_name", None),
+            "large_ollama_server": getattr(config, "large_ollama_server", None),
+        }
+        self._inference_process = multiprocessing.Process(
+            target=inference_worker_process,
+            args=(self._inference_input_queue, self._inference_output_queue, self._inference_stop_event, config_dict),
+            daemon=True
+        )
         self._processing_thread.start()
+        self._inference_process.start()
 
     def stop(self):
         if self._stop_event is not None:
             self._stop_event.set()
+        if self._inference_stop_event is not None:
+            self._inference_stop_event.set()
         if self._processing_thread is not None:
             self._processing_thread.join(timeout=5)
+        if self._inference_process is not None:
+            self._inference_process.join(timeout=5)
         self._processing_thread = None
+        self._inference_process = None
         self._stop_event = None
+        self._inference_stop_event = None
+        self._inference_input_queue = None
+        self._inference_output_queue = None
         if self._video_stream:
             self._video_stream.release()
             self._video_stream = None
 
     def _frame_grabber(self, video_stream, frame_buffer, buffer_lock, stop_event):
         print("[FrameGrabber] INFO: Starting frame grabber thread.")
+        last_buffer_update = time.time()
         while not stop_event.is_set():
             ret, frame = video_stream.read()
             if not ret:
                 print("[FrameGrabber] INFO: End of stream or failed to read frame.")
                 break
-            with buffer_lock:
-                frame_buffer.append(frame)
+            # Update current_frame for inference
+            with self.current_frame_lock:
+                self.current_frame = frame
+            # Update buffer at BUFFER_GRAB_INTERVAL
+            now = time.time()
+            if now - last_buffer_update >= BUFFER_GRAB_INTERVAL:
+                with buffer_lock:
+                    if len(frame_buffer) >= BUFFER_SIZE:
+                        frame_buffer.popleft()  # Leaky: drop oldest
+                    frame_buffer.append(frame)
+                last_buffer_update = now
             time.sleep(FRAME_GRAB_INTERVAL)
         print("[FrameGrabber] INFO: Frame grabber thread exiting.")
 
@@ -103,75 +182,39 @@ class Orchestrator:
             )
             grabber_thread.start()
 
-            last_processed_time = time.time() - IFRAME_INTERVAL_SECONDS
-
             while True:
                 if self._stop_event and self._stop_event.is_set():
                     print("[Orchestrator] INFO: Stop event received, terminating processing loop.")
                     break
 
                 current_trigger_description = self._config.get_trigger_description()
-                current_time = time.time()
-                elapsed_since_last_process = current_time - last_processed_time
+                with self.current_frame_lock:
+                    current_frame = self.current_frame
 
-                if elapsed_since_last_process >= IFRAME_INTERVAL_SECONDS:
-                    last_processed_time = current_time
-                    print(f"[Orchestrator] DEBUG: Cycle start at {time.strftime('%Y-%m-%d %H:%M:%S')}. Trigger: '{current_trigger_description}'.")
+                if current_frame is None:
+                    print("[Orchestrator] INFO: No current frame available. Waiting for frames.")
+                    time.sleep(0.1)
+                    continue
 
-                    with self._buffer_lock:
-                        if self._frame_buffer:
-                            current_frame = self._frame_buffer[-1]
-                        else:
-                            current_frame = None
+                cv2.imwrite(self.latest_small_inference_frame_path, current_frame)
 
-                    if current_frame is None:
-                        print("[Orchestrator] INFO: No frames in buffer. Waiting for frames.")
-                        time.sleep(0.1)
-                        continue
+                # Always update the latest inference input
+                try:
+                    if self._inference_input_queue is not None and not self._inference_input_queue.full():
+                        self._inference_input_queue.put((current_frame.copy(), current_trigger_description, time.time()))
+                except Exception as e:
+                    print(f"[Orchestrator] WARN: Could not queue frame for inference process: {e}")
 
-                    print(f"[Orchestrator] DEBUG: Using latest frame from buffer. Shape: {current_frame.shape}")
+                # Check for new inference results from the process
+                if self._inference_output_queue is not None:
+                    try:
+                        while True:
+                            result = self._inference_output_queue.get_nowait()
+                            self._handle_inference_result(result)
+                    except queue.Empty:
+                        pass
 
-                    with self.latest_small_inference_lock:
-                        cv2.imwrite(self.latest_small_inference_frame_path, current_frame)
-
-                    print(f"[Orchestrator] INFO: Running small inference for trigger: '{current_trigger_description}' using model: {self._config.small_model_name} at {self._config.small_ollama_server}")
-                    small_inference_out: Optional[str] = run_small_inference(
-                        current_frame,
-                        current_trigger_description,
-                        model_name=self._config.small_model_name,
-                        ollama_url=self._config.small_ollama_server
-                    )
-
-                    if small_inference_out:
-                        print(f"[Orchestrator] INFO: Small inference result - Result: {small_inference_out}")
-                        with self.latest_small_inference_result_lock:
-                            self.latest_small_inference_result = {
-                                "result": small_inference_out,
-                                "timestamp": time.time()
-                            }
-                            self.latest_small_inference_result_str = f"[Orchestrator] INFO: Small inference result - Result: {small_inference_out}"
-                        with self.result_status_lock:
-                            self.new_small_result_available = True
-                        if small_inference_out == "yes":
-                            print(f"[Orchestrator] INFO: Trigger MET. Running large inference using model: {self._config.large_model_name} at {self._config.large_ollama_server}")
-                            large_inference_out: Optional[LargeInferenceOutput] = run_large_inference(
-                                current_frame,
-                                current_trigger_description,
-                                model_name=self._config.large_model_name,
-                                ollama_url=self._config.large_ollama_server
-                            )
-                            if large_inference_out:
-                                print(f"[Orchestrator] INFO: Large inference result - Result: '{large_inference_out.result}', Analysis: '{large_inference_out.detailed_analysis[:100]}...'")
-                                with self.latest_large_inference_result_lock:
-                                    self.latest_large_inference_result = large_inference_out.dict()
-                                with self.result_status_lock:
-                                    self.new_large_result_available = True
-                            else:
-                                print("[Orchestrator] WARN: Large inference failed or returned no result.")
-                    else:
-                        print("[Orchestrator] WARN: Small inference failed or returned no result.")
-                else:
-                    time.sleep(0.05)
+                time.sleep(0.01)
 
         except ValueError as ve:
             print(f"[Orchestrator] ERROR: Configuration or source error - {ve}. Terminating.")
@@ -187,6 +230,31 @@ class Orchestrator:
                 self._video_stream.release()
                 self._video_stream = None
             print("[Orchestrator] INFO: Processing finished.")
+
+    def _handle_inference_result(self, result):
+        # Called in main process to update shared state from inference process results
+        small_inference_out = result.get("result")
+        frame = result.get("frame")
+        trigger = result.get("trigger")
+        if small_inference_out:
+            print(f"[Orchestrator] [Main] Small inference result - Result: {small_inference_out}")
+            with self.latest_small_inference_result_lock:
+                self.latest_small_inference_result = {
+                    "result": small_inference_out,
+                    "timestamp": time.time()
+                }
+                self.latest_small_inference_result_str = f"[Orchestrator] INFO: Small inference result - Result: {small_inference_out}"
+            with self.result_status_lock:
+                self.new_small_result_available = True
+            if "large_inference" in result:
+                large_inference_out = result["large_inference"]
+                print(f"[Orchestrator] [Main] Large inference result - {large_inference_out}")
+                with self.latest_large_inference_result_lock:
+                    self.latest_large_inference_result = large_inference_out
+                with self.result_status_lock:
+                    self.new_large_result_available = True
+        else:
+            print("[Orchestrator] [Main] WARN: Small inference failed or returned no result.")
 
     def get_latest_small_inference_frame_path(self):
         return self.latest_small_inference_frame_path
