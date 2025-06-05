@@ -198,17 +198,16 @@ class VLMGradioApp:
             result = self.fetch_latest_small_inference_result()
             if result and result.get("result") is not None:
                 timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                new_log = f"[{timestamp}] [SMALL INFERENCE RESULT] {result}"
+                new_log = f"[{timestamp}] [SMALL INFERENCE RESULT]:  {result['result']}"
                 new_logs.append(new_log)
         if status.get("large"):
             result = self.fetch_latest_large_inference_result()
             print("DEBUG: Large inference result from backend:", result)
             if result:
-                caption = result.get("caption", "")
-                tags = result.get("tags", "")
+                result_val = result.get("result", "")
                 analysis = result.get("detailed_analysis", "")
                 timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                new_log = f"[{timestamp}] [LARGE INFERENCE RESULT] Caption: {caption}, Tags: {tags}, Analysis: {analysis[:80]}..."
+                new_log = f"[{timestamp}] [LARGE INFERENCE RESULT] Result: {result_val}, Analysis: {analysis[:80]}..."
                 new_logs.append(new_log)
         with self.display_logs_lock:
             for log in new_logs:
@@ -234,35 +233,42 @@ class VLMGradioApp:
 
     def build_ui(self):
         with gr.Blocks() as demo:
-            gr.Markdown("# VLM Camera Service Gradio Runner")
-            with gr.Tab("Orchestration"):
-                with gr.Row():
+            with gr.Row():
+                with gr.Column(scale=8):
+                    gr.Markdown("# VLM Camera Service Gradio Runner", elem_id="main-title")
+                with gr.Column(scale=2, min_width=120):
+                    gr.Image(
+                        value="hailo_logo.png",
+                        interactive=False,
+                        show_label=False,
+                        elem_id="hailo-logo",
+                        show_download_button=False,
+                        show_fullscreen_button=False,
+                        container=False
+                    )
+            with gr.Row():
+                with gr.Column(scale=1):
                     source_type = gr.Dropdown(choices=self.video_device_choices, value=self.video_device_choices[0], label="Source Type")
-                    video_input = gr.Video(label="Upload Video File")
-                    trigger = gr.Textbox(label="Trigger Description", value=DEFAULT_TRIGGERS[0], placeholder="Enter trigger description")
-                with gr.Row():
                     start_btn = gr.Button("Start Orchestration")
+                    trigger = gr.Textbox(label="Trigger Description", value=DEFAULT_TRIGGERS[0], placeholder="Enter trigger description")
                     update_btn = gr.Button("Update Trigger")
-                status = gr.Textbox(label="Status", interactive=False)
-                logs = gr.Textbox(label="Logs", lines=10, interactive=False)
+                    video_input = gr.Video(label="Upload Video File")
+                with gr.Column(scale=2):
+                    gr.Markdown("### Latest Small Inference Frame (Auto-Refresh)")
+                    latest_small_frame = gr.Image(label="Latest Small Inference Frame")
+                    status = gr.Textbox(label="Status", interactive=False)
+                    logs = gr.Textbox(label="Logs", lines=10, interactive=False)
 
-                start_btn.click(self.on_start, inputs=[source_type, video_input, trigger], outputs=[status, logs])
-                update_btn.click(self.on_update, inputs=[trigger], outputs=[status, logs])
+            start_btn.click(self.on_start, inputs=[source_type, video_input, trigger], outputs=[status, logs])
+            update_btn.click(self.on_update, inputs=[trigger], outputs=[status, logs])
+            logs.change(fn=self.update_logs, outputs=logs)
 
-                logs.change(fn=self.update_logs, outputs=logs)
-
-                gr.Markdown("### Latest Small Inference Frame (Auto-Refresh)")
-                latest_small_frame = gr.Image(label="Latest Small Inference Frame")
-
-                timer = gr.Timer(value=1)
-                timer.tick(
-                    fn=self.refresh_small_frame_auto,
-                    inputs=[],
-                    outputs=[latest_small_frame, logs],
-                )
-
-                # Placeholder for future: video frame inference (only one at a time)
-                # ...
+            timer = gr.Timer(value=1)
+            timer.tick(
+                fn=self.refresh_small_frame_auto,
+                inputs=[],
+                outputs=[latest_small_frame, logs],
+            )
         return demo
 
     def run(self):

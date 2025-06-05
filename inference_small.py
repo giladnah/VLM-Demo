@@ -120,6 +120,8 @@ def run_small_inference(
                 new_h = int(h * scale)
                 logger.debug(f"Resizing image from {w}x{h} to {new_w}x{new_h}")
                 frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            else:
+                new_w, new_h = w, h
 
             # 2. Encode the frame as JPEG in memory with specified quality
             encode_params = [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality]

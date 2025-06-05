@@ -55,8 +55,7 @@ def mock_small_inference_output_not_triggered() -> str:
 def mock_large_inference_output() -> LargeInferenceOutput:
     """Provides a mock LargeInferenceOutput."""
     return LargeInferenceOutput(
-        caption="Detailed analysis of the triggered frame.",
-        tags=["analysis", "triggered"],
+        result="yes",
         detailed_analysis="This frame contained elements that met the trigger."
     )
 

@@ -23,16 +23,16 @@ RETRY_DELAY = 2  # seconds
 
 class LargeInferenceOutput(BaseModel):
     """Data model for the structured output of the large VLM inference."""
-    caption: str
-    tags: List[str] = Field(default_factory=list)
-    detailed_analysis: str # Could be Dict[str, Any] if a more structured analysis is expected
+    result: str  # 'yes' or 'no'
+    detailed_analysis: str
 
 class OllamaError(Exception):
     """Custom exception for Ollama related errors encountered during inference."""
     pass # Re-using the same exception type as in inference_small for consistency
 
 def run_large_inference(
-    frame: ImageFrame,
+    frame: Union[ImageFrame, List[ImageFrame]],
+    trigger_description: str,
     model_name: str = MODEL_NAME_DEFAULT_LARGE,
     timeout_seconds: int = 90,
     ollama_url: str = OLLAMA_URL_DEFAULT,
@@ -44,8 +44,10 @@ def run_large_inference(
 ) -> Optional[LargeInferenceOutput]:
     """
     Runs inference using a large VLM (via Ollama REST API) on a given image frame.
+    Accepts either a single frame or a list of frames (uses the last frame if a list).
     Args:
-        frame (ImageFrame): The image frame (NumPy array from OpenCV) to process.
+        frame (Union[ImageFrame, List[ImageFrame]]): The image frame (NumPy array from OpenCV) to process.
+        trigger_description (str): The textual trigger description to check for (e.g., "a person falling down").
         model_name (str, optional): The name of the Ollama model to use.
         timeout_seconds (int, optional): Timeout for the Ollama REST API call.
         ollama_url (str, optional): The base URL for the Ollama server.
@@ -57,6 +59,12 @@ def run_large_inference(
     Returns:
         Optional[LargeInferenceOutput]: A LargeInferenceOutput object if successful, None if all retries fail.
     """
+    # If a list of frames is provided, use the last frame
+    if isinstance(frame, list):
+        if not frame:
+            return None
+        frame = frame[-1]
+
     for attempt in range(1, retry_count + 1):
         try:
             # 1. Resize the image to reduce payload size while maintaining aspect ratio
@@ -81,11 +89,10 @@ def run_large_inference(
 
             # 3. Construct the prompt for the VLM
             prompt = (
-                "Provide a detailed analysis of this image. "
-                "Respond ONLY with a JSON object containing these keys: "
-                "'caption' (a descriptive sentence about the image), "
-                "'tags' (a list of relevant keywords or detected objects/attributes, max 10 tags), and "
-                "'detailed_analysis' (a concise textual description or notable insights about the scene, 2-3 sentences)."
+                f"Analyze this image. Based on the image, is there a '{trigger_description}' present? "
+                "Respond ONLY with a JSON object containing: "
+                "'result': 'yes' or 'no' (whether the trigger is present), "
+                "and 'detailed_analysis': a one sentence concise explanation of why the trigger was or was not detected. "
             )
 
             # 4. Prepare the payload with the base64-encoded image
@@ -179,31 +186,28 @@ if __name__ == '__main__':
 
     if current_image_frame is not None:
         print("\n--- Test 1: Single frame input ---")
-        result_single = run_large_inference(current_image_frame)
+        result_single = run_large_inference(current_image_frame, "a person falling down")
         if result_single:
             print("Large inference (single frame) successful:")
-            print(f"  Caption: {result_single.caption}")
-            print(f"  Tags: {result_single.tags}")
+            print(f"  Result: {result_single.result}")
             print(f"  Analysis: {result_single.detailed_analysis}")
         else:
             print("Large inference (single frame) failed or returned no result.")
             print("  Check Ollama status and model availability.")
 
         print("\n--- Test 2: List of frames input (processes last frame) ---")
-        # Create a dummy list of frames, where the last one is our test image
         dummy_older_frame = np.zeros((50,50,3), dtype=np.uint8)
         frames_list = [dummy_older_frame, current_image_frame]
-        result_list = run_large_inference(frames_list)
+        result_list = run_large_inference(frames_list, "a person falling down")
         if result_list:
             print("Large inference (list of frames) successful:")
-            print(f"  Caption: {result_list.caption}")
-            print(f"  Tags: {result_list.tags}")
+            print(f"  Result: {result_list.result}")
             print(f"  Analysis: {result_list.detailed_analysis}")
         else:
             print("Large inference (list of frames) failed or returned no result.")
 
         print("\n--- Test 3: Empty list input ---")
-        result_empty_list = run_large_inference([])
+        result_empty_list = run_large_inference([], "a person falling down")
         if result_empty_list is None:
             print("Large inference with empty list correctly returned None.")
         else:

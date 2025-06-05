@@ -13,3 +13,13 @@ default_triggers:
   - "a person falling down"
   - "a blue car"
   - "a test pattern"
+rtsp_cameras:
+  # - name: "Desk Camera"
+  #   address: "rtsp://192.168.68.110/axis-media/media.amp"
+  #   username: "root"
+  #   password: "hailo"
+  - name: "Office Camera"
+    address: "rtsp://192.168.241.62/axis-media/media.amp"
+    username: "root"
+    password: "hailo"
+

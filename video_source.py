@@ -5,12 +5,18 @@ import cv2
 import numpy as np # Add numpy import
 from typing import TypeAlias # Add TypeAlias import
 
+# OpenCV constants with fallback for linters
+CAP_PROP_POS_FRAMES = getattr(cv2, 'CAP_PROP_POS_FRAMES', 1)
+CAP_PROP_FPS = getattr(cv2, 'CAP_PROP_FPS', 5)
+CAP_PROP_FRAME_WIDTH = getattr(cv2, 'CAP_PROP_FRAME_WIDTH', 3)
+CAP_PROP_FRAME_HEIGHT = getattr(cv2, 'CAP_PROP_FRAME_HEIGHT', 4)
+
 # Type alias for an image frame, expected to be a NumPy array from OpenCV.
 ImageFrame: TypeAlias = np.ndarray
 
 class VideoStream:
     """Represents a video stream, encapsulating the OpenCV VideoCapture object."""
-    def __init__(self, capture: cv2.VideoCapture, source_uri: str):
+    def __init__(self, capture: 'cv2.VideoCapture', source_uri: str): # type: ignore
         """
         Initializes the VideoStream.
 
@@ -22,16 +28,21 @@ class VideoStream:
             raise ValueError(f"Could not open video stream from {source_uri}")
         self.capture = capture
         self.source_uri = source_uri
+        self.is_file = not source_uri.lower().startswith("rtsp://")
 
     def read(self) -> tuple[bool, Any | None]:
         """
-        Reads a frame from the video stream.
-
+        Reads a frame from the video stream. If the source is a file and the end is reached, loops to the start.
         Returns:
             tuple[bool, Any | None]: A tuple containing a boolean indicating success
                                      and the frame (numpy array) if successful, None otherwise.
         """
-        return self.capture.read()
+        ret, frame = self.capture.read()
+        if not ret and self.is_file:
+            # Loop: seek to start and try again
+            self.capture.set(CAP_PROP_POS_FRAMES, 0)
+            ret, frame = self.capture.read()
+        return ret, frame
 
     def release(self) -> None:
         """Releases the video capture object."""
@@ -44,7 +55,7 @@ class VideoStream:
         Returns:
             float: The FPS of the video stream.
         """
-        return self.capture.get(cv2.CAP_PROP_FPS)
+        return self.capture.get(CAP_PROP_FPS)
 
     def get_frame_width(self) -> int:
         """
@@ -53,7 +64,7 @@ class VideoStream:
         Returns:
             int: The width of the frames.
         """
-        return int(self.capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+        return int(self.capture.get(CAP_PROP_FRAME_WIDTH))
 
     def get_frame_height(self) -> int:
         """
@@ -62,17 +73,18 @@ class VideoStream:
         Returns:
             int: The height of the frames.
         """
-        return int(self.capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        return int(self.capture.get(CAP_PROP_FRAME_HEIGHT))
 
 
 def get_video_stream(source_uri: str) -> VideoStream:
     """
-    Connects to a video source (RTSP stream or local file path) and returns a VideoStream object.
+    Connects to a video source (RTSP stream, local file path, or /dev/video* device) and returns a VideoStream object.
 
     Args:
         source_uri (str): The URI of the video source.
-                          Can be an RTSP URL (e.g., "rtsp://user:pass@ip_address:port/path")
-                          or a local file path (e.g., "/path/to/video.mp4").
+                          Can be an RTSP URL (e.g., "rtsp://user:pass@ip_address:port/path"),
+                          a local file path (e.g., "/path/to/video.mp4"),
+                          or a webcam device (e.g., "/dev/video0").
 
     Returns:
         VideoStream: An object representing the video stream.
@@ -80,7 +92,13 @@ def get_video_stream(source_uri: str) -> VideoStream:
     Raises:
         ValueError: If the video stream cannot be opened.
     """
-    cap = cv2.VideoCapture(source_uri)
+    # Handle /dev/video* as webcam device (OpenCV expects int index or string path)
+    if source_uri.startswith("/dev/video"):
+        cap = cv2.VideoCapture(source_uri) # type: ignore[attr-defined]
+    else:
+        cap = cv2.VideoCapture(source_uri) # type: ignore[attr-defined]
+    # Set FPS to 30 for all sources
+    cap.set(CAP_PROP_FPS, 30)
     return VideoStream(capture=cap, source_uri=source_uri)
 
 
@@ -147,7 +165,7 @@ if __name__ == '__main__':
             i_frame_from_file = extract_i_frame(video_file_stream)
             if i_frame_from_file is not None:
                 print(f"Extracted I-frame from file. Shape: {i_frame_from_file.shape}")
-                cv2.imwrite("i_frame_from_file.jpg", i_frame_from_file)
+                cv2.imwrite("i_frame_from_file.jpg", i_frame_from_file) # type: ignore[attr-defined]
                 print("Saved extracted frame as 'i_frame_from_file.jpg'")
             else:
                 print("Failed to extract I-frame from file.")
@@ -178,7 +196,7 @@ if __name__ == '__main__':
     print("\\n--- Example of how to use VideoStream directly ---")
     if TEST_SOURCE_FILE:
         try:
-            raw_capture = cv2.VideoCapture(TEST_SOURCE_FILE)
+            raw_capture = cv2.VideoCapture(TEST_SOURCE_FILE) # type: ignore[attr-defined]
             if raw_capture.isOpened():
                 vs = VideoStream(raw_capture, TEST_SOURCE_FILE)
                 print(f"VideoStream created. FPS: {vs.get_fps()}, Resolution: {vs.get_frame_width()}x{vs.get_frame_height()}")

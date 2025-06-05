@@ -361,7 +361,7 @@ async def direct_large_inference(image: UploadFile = File(...), model_name: Opti
         print(f"[API /infer/large] WARN: Large inference direct call returned no result.")
         raise HTTPException(status_code=500, detail="Large VLM inference failed or returned no result. Check server logs.")
 
-    print(f"[API /infer/large] INFO: Large inference direct call successful. Caption: '{inference_result.caption}'")
+    print(f"[API /infer/large] INFO: Large inference direct call successful. Result: '{inference_result.result}', Analysis: '{inference_result.detailed_analysis[:80]}...'")
     return inference_result
 
 @app.get("/latest-small-inference-frame", tags=["Debug"], summary="Get the latest frame used for small inference.")

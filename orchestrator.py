@@ -156,11 +156,12 @@ class Orchestrator:
                             print(f"[Orchestrator] INFO: Trigger MET. Running large inference using model: {self._config.large_model_name} at {self._config.large_ollama_server}")
                             large_inference_out: Optional[LargeInferenceOutput] = run_large_inference(
                                 current_frame,
+                                current_trigger_description,
                                 model_name=self._config.large_model_name,
                                 ollama_url=self._config.large_ollama_server
                             )
                             if large_inference_out:
-                                print(f"[Orchestrator] INFO: Large inference result - Caption: '{large_inference_out.caption}', Tags: {large_inference_out.tags}, Analysis: '{large_inference_out.detailed_analysis[:100]}...'")
+                                print(f"[Orchestrator] INFO: Large inference result - Result: '{large_inference_out.result}', Analysis: '{large_inference_out.detailed_analysis[:100]}...'")
                                 with self.latest_large_inference_result_lock:
                                     self.latest_large_inference_result = large_inference_out.dict()
                                 with self.result_status_lock:
