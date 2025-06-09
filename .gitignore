@@ -78,3 +78,7 @@ hailort.log
 
 hefs_and_embeddings/*.hef
 hefs_and_embeddings/*.npy
+
+tests/__pycache__/
+*.pyc
+latest_small_inference.jpg
