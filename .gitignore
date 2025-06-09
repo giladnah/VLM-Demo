@@ -67,11 +67,11 @@ Pipfile.lock
 # Pyre type checker
 .pyre/
 
-# VS Code
-.vscode/
-
 # MacOS
 .DS_Store
 
 # System files
 Thumbs.db
+
+test_examples/
+hailort.log
