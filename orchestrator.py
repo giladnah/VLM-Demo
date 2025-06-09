@@ -77,12 +77,15 @@ def inference_worker_process(input_queue, output_queue, stop_event, config):
             model_name=config["small_model_name"],
             ollama_url=config["small_ollama_server"]
         )
+        # Immediately send small inference result
         result_payload = {
             "result": small_inference_out,
             "timestamp": time.time(),
             "frame": frame,
             "trigger": trigger_description
         }
+        output_queue.put(result_payload)
+        # If trigger is met, run large inference and send a second result
         if small_inference_out == "yes":
             print(f"[Orchestrator] [InferenceProcess] Trigger MET. Running large inference using model: {config['large_model_name']} at {config['large_ollama_server']}")
             large_inference_out: Optional[LargeInferenceOutput] = run_large_inference(
@@ -93,8 +96,15 @@ def inference_worker_process(input_queue, output_queue, stop_event, config):
             )
             if large_inference_out:
                 print(f"[Orchestrator] [InferenceProcess] Large inference result - Result: '{large_inference_out.result}', Analysis: '{large_inference_out.detailed_analysis[:100]}...'")
-                result_payload["large_inference"] = large_inference_out.dict()
-        output_queue.put(result_payload)
+                # Send a second payload with large inference result
+                result_payload_large = {
+                    "result": small_inference_out,  # Always include small result for context
+                    "timestamp": time.time(),
+                    "frame": frame,
+                    "trigger": trigger_description,
+                    "large_inference": large_inference_out.dict()
+                }
+                output_queue.put(result_payload_large)
     print("[Orchestrator] [InferenceProcess] Exiting.")
 
 class Orchestrator:
@@ -288,7 +298,8 @@ class Orchestrator:
         small_inference_out = result.get("result")
         frame = result.get("frame")
         trigger = result.get("trigger")
-        if small_inference_out:
+        # Always update small inference result if present
+        if small_inference_out is not None:
             print(f"[Orchestrator] [Main] Small inference result - Result: {small_inference_out}")
             with self.latest_small_inference_result_lock:
                 self.latest_small_inference_result = {
@@ -298,14 +309,15 @@ class Orchestrator:
                 self.latest_small_inference_result_str = f"[Orchestrator] INFO: Small inference result - Result: {small_inference_out}"
             with self.result_status_lock:
                 self.new_small_result_available = True
-            if "large_inference" in result:
-                large_inference_out = result["large_inference"]
-                print(f"[Orchestrator] [Main] Large inference result - {large_inference_out}")
-                with self.latest_large_inference_result_lock:
-                    self.latest_large_inference_result = large_inference_out
-                with self.result_status_lock:
-                    self.new_large_result_available = True
-        else:
+        # Only update large inference result if present in this payload
+        if "large_inference" in result:
+            large_inference_out = result["large_inference"]
+            print(f"[Orchestrator] [Main] Large inference result - {large_inference_out}")
+            with self.latest_large_inference_result_lock:
+                self.latest_large_inference_result = large_inference_out
+            with self.result_status_lock:
+                self.new_large_result_available = True
+        elif small_inference_out is None:
             print("[Orchestrator] [Main] WARN: Small inference failed or returned no result.")
 
     def get_latest_small_inference_frame(self) -> Optional[Any]:

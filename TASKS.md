@@ -64,20 +64,6 @@ Use this checklist to track progress on building the VLM Camera Application.
 * [x] **Implement `/infer/large` endpoint** (2024-07-15)
 * [x] **Implement `/health` endpoint** (2024-07-15)
 
-## Discovered During Work
-
-* [ ] **Unit tests for `video_source.py`**
-  * Test VideoStream with file and RTSP sources (mock OpenCV).
-  * Test frame looping, release, FPS/size getters.
-* [ ] **Unit tests for `buffer.py`**
-  * Test buffer initialization, update, overflow, and type safety.
-* [ ] **Additional orchestrator tests**
-  * Buffer operation exceptions.
-  * extract_i_frame exceptions.
-  * Integration/performance: test with different interval constants.
-* [ ] **Smoke/integration test for `gradio_runner.py`**
-  * Test API connectivity and basic UI flow (can be minimal).
-
 ## Code Review, Documentation, and Test Coverage
 
 * [x] **buffer.py**
