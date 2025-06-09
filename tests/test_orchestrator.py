@@ -11,7 +11,7 @@ from unittest.mock import patch, MagicMock, call # call for checking multiple ca
 import numpy as np
 
 # Modules to test and their components
-from orchestrator import orchestrator, IFRAME_INTERVAL_SECONDS, BUFFER_SIZE, OrchestrationConfig
+from orchestrator import orchestrator, BUFFER_SIZE, OrchestrationConfig
 
 # Dependent modules that will be mocked
 # (Actual classes/models are used for type hinting and constructing mock return values)

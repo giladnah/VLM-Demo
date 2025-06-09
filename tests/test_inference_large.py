@@ -1,4 +1,16 @@
-"""Unit tests for the inference_large.py module."""
+"""
+Unit tests for inference_large.py.
+
+Covers expected, edge, and failure cases for the run_large_inference function, including:
+- Successful inference (valid result)
+- API/server errors
+- Malformed/invalid JSON responses
+- Missing/invalid keys in the response
+- Request exceptions
+- Edge case: invalid input type
+
+Uses pytest and unittest.mock for isolation from external dependencies.
+"""
 
 import pytest
 import numpy as np
@@ -63,5 +75,5 @@ def test_large_inference_request_exception(mock_post, dummy_image_frame_large):
 # Edge case: invalid input type
 
 def test_invalid_frames_type_input():
-    result = run_large_inference("not_an_image_or_list") # type: ignore
+    result = run_large_inference("not_an_image_or_list", "dummy trigger") # type: ignore
     assert result is None

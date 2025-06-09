@@ -1,3 +1,9 @@
+"""
+Gradio UI runner for the VLM Camera Service.
+
+This module provides a user-friendly web interface for interacting with the FastAPI backend, allowing users to select video sources, set triggers, start orchestration, and view inference results and logs.
+"""
+
 import gradio as gr
 import requests
 import threading
@@ -14,7 +20,15 @@ API_URL = CONFIG['server_ips']['backend']
 DEFAULT_TRIGGERS = CONFIG.get('default_triggers', ["a person falling down"])
 
 class VLMGradioApp:
-    def __init__(self):
+    """
+    Gradio application for the VLM Camera Service.
+
+    Handles UI logic, polling, and backend API communication.
+    """
+    def __init__(self) -> None:
+        """
+        Initializes the Gradio app, device choices, and polling thread.
+        """
         self.display_logs = []
         self.display_logs_lock = threading.Lock()
         self.rtsp_cameras = self.fetch_rtsp_cameras()
@@ -24,7 +38,13 @@ class VLMGradioApp:
         self.last_frame = None
         self.last_status_md_content = "<span style='color: gray; font-size: 1.5em; font-weight: bold;'>...</span>"
 
-    def fetch_rtsp_cameras(self):
+    def fetch_rtsp_cameras(self) -> list:
+        """
+        Fetches RTSP camera configurations from the backend.
+
+        Returns:
+            list: List of RTSP camera configs.
+        """
         try:
             resp = requests.get(f"{API_URL}/rtsp-cameras", timeout=3)
             if resp.ok:
@@ -33,7 +53,13 @@ class VLMGradioApp:
             pass
         return []
 
-    def get_video_device_choices(self):
+    def get_video_device_choices(self) -> list:
+        """
+        Returns a list of available video device choices (webcams, RTSP, upload).
+
+        Returns:
+            list: List of device choice strings.
+        """
         devices = sorted(glob.glob("/dev/video*"))
         choices = ["Upload Video"]
         for dev in devices:
@@ -43,7 +69,16 @@ class VLMGradioApp:
             choices.append(f"RTSP: {cam['name']}")
         return choices
 
-    def get_rtsp_url_by_name(self, name):
+    def get_rtsp_url_by_name(self, name: str) -> str | None:
+        """
+        Returns the RTSP URL for a given camera name.
+
+        Args:
+            name (str): Camera name.
+
+        Returns:
+            str | None: RTSP URL or None if not found.
+        """
         for cam in self.rtsp_cameras:
             if cam['name'] == name:
                 # Build RTSP URL with credentials if provided
@@ -57,7 +92,18 @@ class VLMGradioApp:
                 return addr
         return None
 
-    def start_orchestration(self, source_type, video_file, trigger):
+    def start_orchestration(self, source_type: str, video_file, trigger: str) -> tuple[str, str]:
+        """
+        Starts orchestration by sending a request to the backend.
+
+        Args:
+            source_type (str): Video source type.
+            video_file: Uploaded video file or path.
+            trigger (str): Trigger description.
+
+        Returns:
+            tuple[str, str]: (Status message, logs string)
+        """
         if source_type.startswith("Webcam: "):
             video_path = source_type.replace("Webcam: ", "")
         elif source_type.startswith("RTSP: "):
@@ -101,7 +147,16 @@ class VLMGradioApp:
                 self.display_logs.append(f"[{timestamp}] [START][EXCEPTION] {e}")
             return f"Exception: {e}", "\n".join(self.display_logs)
 
-    def update_trigger(self, trigger):
+    def update_trigger(self, trigger: str) -> str:
+        """
+        Updates the trigger description in the backend.
+
+        Args:
+            trigger (str): New trigger description.
+
+        Returns:
+            str: Status message.
+        """
         try:
             resp = requests.put(f"{API_URL}/trigger", json={"trigger": trigger})
             if resp.ok:
@@ -121,7 +176,16 @@ class VLMGradioApp:
                 self.display_logs.append(f"[{timestamp}] [TRIGGER][EXCEPTION] {e}")
             return f"Exception: {e}"
 
-    def infer_large(self, image_file):
+    def infer_large(self, image_file) -> tuple[str | None, str]:
+        """
+        Runs large model inference on an uploaded image via the backend.
+
+        Args:
+            image_file: Uploaded image file or path.
+
+        Returns:
+            tuple[str | None, str]: (Image path or None, result or error message)
+        """
         if image_file is None:
             return None, "Please upload an image."
         try:
@@ -148,7 +212,13 @@ class VLMGradioApp:
         except Exception as e:
             return None, f"Exception: {e}"
 
-    def fetch_latest_small_inference_frame(self):
+    def fetch_latest_small_inference_frame(self) -> Image.Image | None:
+        """
+        Fetches the latest small inference frame from the backend.
+
+        Returns:
+            Image.Image | None: Latest frame as PIL Image, or None if unavailable.
+        """
         try:
             resp = requests.get(f"{API_URL}/latest-small-inference-frame", timeout=2)
             if resp.ok:
@@ -157,7 +227,13 @@ class VLMGradioApp:
             pass
         return None
 
-    def fetch_latest_small_inference_result(self):
+    def fetch_latest_small_inference_result(self) -> dict:
+        """
+        Fetches the latest small inference result from the backend.
+
+        Returns:
+            dict: Inference result.
+        """
         try:
             resp = requests.get(f"{API_URL}/latest-small-inference-result", timeout=2)
             if resp.ok:
@@ -166,7 +242,13 @@ class VLMGradioApp:
             pass
         return {}
 
-    def fetch_latest_large_inference_result(self):
+    def fetch_latest_large_inference_result(self) -> dict:
+        """
+        Fetches the latest large inference result from the backend.
+
+        Returns:
+            dict: Inference result.
+        """
         try:
             resp = requests.get(f"{API_URL}/latest-large-inference-result", timeout=2)
             if resp.ok:
@@ -175,7 +257,13 @@ class VLMGradioApp:
             pass
         return {}
 
-    def fetch_results_status(self):
+    def fetch_results_status(self) -> dict:
+        """
+        Fetches the status of available inference results from the backend.
+
+        Returns:
+            dict: Status of small and large inference results.
+        """
         try:
             resp = requests.get(f"{API_URL}/results_status", timeout=2)
             if resp.ok:
@@ -184,14 +272,23 @@ class VLMGradioApp:
             pass
         return {"small": False, "large": False}
 
-    def poll_results(self):
+    def poll_results(self) -> None:
+        """
+        Polls the backend for results and manages log trimming in a background thread.
+        """
         while True:
             time.sleep(2)
             with self.display_logs_lock:
                 if len(self.display_logs) > 10:
                     del self.display_logs[:-10]
 
-    def refresh_small_frame_auto(self):
+    def refresh_small_frame_auto(self) -> tuple[Image.Image | None, str, str]:
+        """
+        Refreshes the small inference frame, status, and logs for the UI.
+
+        Returns:
+            tuple[Image.Image | None, str, str]: (Frame, status markdown, logs string)
+        """
         status = self.fetch_results_status()
         new_logs = []
         status_md_content = self.last_status_md_content
@@ -240,12 +337,32 @@ class VLMGradioApp:
             logs_str = "\n".join(self.display_logs)
         return self.last_frame, status_md_content, logs_str
 
-    def on_start(self, src_type, video, trig):
+    def on_start(self, src_type, video, trig) -> tuple[str, str]:
+        """
+        Gradio callback for starting orchestration.
+
+        Args:
+            src_type: Source type.
+            video: Uploaded video.
+            trig: Trigger description.
+
+        Returns:
+            tuple[str, str]: (Status message, logs string)
+        """
         msg, logs_str = self.start_orchestration(src_type, video, trig)
         with self.display_logs_lock:
             return msg, "\n".join(self.display_logs)
 
-    def on_update(self, trig):
+    def on_update(self, trig) -> tuple[str, str]:
+        """
+        Gradio callback for updating the trigger.
+
+        Args:
+            trig: New trigger description.
+
+        Returns:
+            tuple[str, str]: (Status message, logs string)
+        """
         msg = self.update_trigger(trig)
         with self.display_logs_lock:
             return msg, "\n".join(self.display_logs)

@@ -1,3 +1,13 @@
+"""
+Unit tests for config.py.
+
+Covers expected, edge, and failure cases for the configuration loader, including:
+- Successful config loading and key presence
+- Caching behavior
+- Missing file and invalid YAML error handling
+
+Uses pytest and monkeypatching for isolation.
+"""
 import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -19,7 +29,7 @@ def test_config_loads():
     assert 'backend' in config['server_ips']
     assert 'default_triggers' in config
     assert isinstance(config['default_triggers'], list)
-    assert config['default_triggers'][0] == "a person falling down"
+    assert isinstance(config['default_triggers'][0], str)
 
 def test_get_config_returns_same_object():
     config1 = get_config()

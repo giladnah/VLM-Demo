@@ -1,0 +1,10 @@
+============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-8.3.5, pluggy-1.6.0 -- /home/giladn/tappas_apps/repos/VLM-Demo/venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/giladn/tappas_apps/repos/VLM-Demo
+plugins: typeguard-4.4.2, anyio-4.9.0
+collecting ... collected 1 item
+
+tests/test_gradio_runner.py::test_gradio_app_instantiation_and_ui PASSED [100%]
+
+========================= 1 passed, 1 warning in 2.04s =========================

@@ -1,4 +1,12 @@
-"""Unit tests for the trigger.py module."""
+"""
+Unit tests for trigger.py.
+
+Covers expected, edge, and failure cases for the evaluate_trigger function, including:
+- 'yes' and 'no' inference results
+- None as inference result (failure/edge case)
+
+Uses pytest for parameterized and explicit tests.
+"""
 
 import sys
 import os

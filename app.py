@@ -88,15 +88,24 @@ class UpdateTriggerRequest(BaseModel):
         }
 
 @app.get("/", tags=["Root"], summary="Root path with a welcome message.")
-async def read_root():
-    """Root endpoint providing a welcome message."""
+async def read_root() -> dict:
+    """
+    Root endpoint providing a welcome message.
+
+    Returns:
+        dict: Welcome message.
+    """
     return {"message": "Welcome to the VLM Camera Service API!"}
 
 @app.get("/health", tags=["Service Health"], summary="Performs a health check of the service and models.")
-async def health_check():
-    """Enhanced health check endpoint.
+async def health_check() -> dict:
+    """
+    Enhanced health check endpoint.
 
     Checks for Ollama CLI accessibility and the presence of required VLM models.
+
+    Returns:
+        dict: Service status, Ollama CLI accessibility, model availability, and details.
     """
     service_status = "ok"
     messages = ["FastAPI service is running."]
@@ -217,12 +226,16 @@ async def health_check():
 # - /infer/large (POST): for direct large model inference
 
 @app.post("/start", tags=["Orchestration"], summary="Starts or restarts the video processing orchestration.")
-async def start_processing(request: StartRequest, background_tasks: BackgroundTasks):
-    """Starts the video processing pipeline in the background.
+async def start_processing(request: StartRequest, background_tasks: BackgroundTasks) -> dict:
+    """
+    Starts the video processing pipeline in the background.
 
-    Accepts a video source URI and an initial trigger description.
-    If a previous orchestration is running, it will be signaled to stop
-    before the new one begins with the new configuration.
+    Args:
+        request (StartRequest): The request body containing source, trigger, and model/server info.
+        background_tasks (BackgroundTasks): FastAPI background task manager.
+
+    Returns:
+        dict: Status and configuration of the started orchestration.
     """
     config = OrchestrationConfig(
         source_uri=request.source,
@@ -246,10 +259,15 @@ async def start_processing(request: StartRequest, background_tasks: BackgroundTa
     }
 
 @app.put("/trigger", tags=["Orchestration"], summary="Updates the trigger description for the active orchestration.")
-async def update_trigger(request: UpdateTriggerRequest):
-    """Updates the trigger description for the currently running orchestration.
+async def update_trigger(request: UpdateTriggerRequest) -> dict:
+    """
+    Updates the trigger description for the currently running orchestration.
 
-    If no orchestration is active, an error is returned.
+    Args:
+        request (UpdateTriggerRequest): The request body containing the new trigger description.
+
+    Returns:
+        dict: Status and message about the trigger update.
     """
     # No need for orchestration_lock or global config, just update via orchestrator
     if orchestrator._config is None:

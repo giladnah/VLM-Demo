@@ -1,4 +1,15 @@
-"""Unit tests for the inference_small.py module."""
+"""
+Unit tests for inference_small.py.
+
+Covers expected, edge, and failure cases for the run_small_inference function, including:
+- Successful inference ("yes"/"no")
+- API/server errors
+- Malformed/invalid JSON responses
+- Missing result keys
+- Request exceptions
+
+Uses pytest and unittest.mock for isolation from external dependencies.
+"""
 
 import pytest
 import numpy as np

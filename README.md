@@ -1,111 +1,87 @@
-# VLM Camera Application
+# VLM Camera Service
 
-## Overview
+A Vision-Language Model (VLM) Camera Service for real-time video analysis using small and large VLMs (e.g., Qwen2.5vl) via the Ollama inference engine. It provides:
+- A FastAPI backend for orchestration, inference, and API endpoints.
+- A Gradio-based web UI for user interaction.
+- Modular Python code for video streaming, buffering, inference, and trigger logic.
 
-This project implements a Vision Language Model (VLM) powered camera application. It can connect to video sources (like RTSP streams or local files), process frames, and perform inferences using both small and large VLMs based on configurable triggers. The application exposes a FastAPI backend for controlling the orchestration and performing direct inferences.
+---
 
-## Features
+## Architecture & Main Components
 
-- **Video Ingestion**: Connects to RTSP streams or local video files.
-- **Frame Processing**: Extracts frames from the video source.
-- **Rolling Buffer**: Maintains a buffer of recent frames.
-- **Small VLM Inference**: Periodically runs a small VLM (e.g., Qwen2.5-VL 3B) on extracted frames to detect trigger conditions.
-- **Dynamic Triggers**: Allows updating the trigger condition for the small VLM at runtime.
-- **Large VLM Inference**: If the small VLM detects a trigger, a larger VLM (e.g., Qwen2.5-VL 7B) is run on the relevant frame(s) for more detailed analysis (captioning, tagging, detailed description).
-- **FastAPI Backend**:
-    - `/start`: Endpoint to start/restart the video processing orchestration.
-    - `/trigger`: Endpoint to update the trigger description for an active orchestration.
-    - `/infer/small`: Endpoint for direct inference with the small VLM using a provided image and trigger.
-    - `/infer/large`: Endpoint for direct inference with the large VLM using a provided image.
-    - `/health`: Endpoint to check service status, Ollama CLI accessibility, and required model availability.
-- **Modular Design**: Code is organized into modules for video source, buffering, inference, triggering, and orchestration.
-- **Unit Tests**: Pytest unit tests for various modules.
+**1. FastAPI Backend (`app.py`)**
+- Exposes REST API endpoints for orchestration, inference, trigger updates, and health checks.
+- Can be run directly (`python app.py`) or with Uvicorn.
 
-## Project Structure
+**2. Orchestrator (`orchestrator.py`)**
+- Manages the video processing pipeline: video stream acquisition, frame grabbing, buffering, inference, and trigger logic.
+- Uses multiprocessing for inference.
 
-```
-.
-├── app.py                  # FastAPI application
-├── orchestrator.py         # Main orchestration logic
-├── video_source.py         # Video stream handling
-├── buffer.py               # Frame buffer management
-├── inference_small.py      # Small VLM inference logic
-├── inference_large.py      # Large VLM inference logic
-├── trigger.py              # Trigger evaluation logic
-├── TASKS.md                # Project task tracking
-├── PLANNING.md             # (Assumed, as per instructions) Project planning details
-├── requirements.txt        # Python dependencies (to be generated)
-├── config.yaml             # Main configuration file for models, servers, triggers
-├── gradio_runner.py        # Gradio UI application
-├── venv/                   # Python virtual environment
-└── tests/                  # Pytest unit tests
-    ├── test_orchestrator.py
-    ├── test_inference_small.py
-    ├── test_inference_large.py
-    └── test_trigger.py
-```
+**3. Inference Modules**
+- `inference_small.py` / `inference_large.py`: Run inference using small/large VLMs via Ollama REST API or CLI.
+- `inference_small_hailo.py`: (Optional) Hailo device integration for hardware-accelerated inference.
+
+**4. Video and Buffering**
+- `video_source.py`: Handles video stream input and I-frame extraction.
+- `buffer.py`: Manages a fixed-size frame buffer using a deque.
+
+**5. Trigger Logic**
+- `trigger.py`: Evaluates whether the inference result meets the trigger condition.
+
+**6. Gradio UI (`gradio_runner.py`)**
+- User-friendly web interface for selecting video sources, setting triggers, starting orchestration, and viewing results/logs.
+- Communicates with the FastAPI backend via HTTP.
+
+**7. Configuration**
+- `config.yaml`: Central config for model names, server addresses, and default triggers.
+
+**8. Testing**
+- `tests/`: Pytest-based unit tests for core modules.
+
+---
+
+## Application Flow
+
+1. Start the backend (`app.py`) and Gradio UI (`gradio_runner.py`).
+2. Select a video source and trigger in the UI.
+3. UI sends a `/start` request to the backend, which initializes the orchestrator.
+4. Orchestrator grabs frames, runs small model inference, and if the trigger is met, runs large model inference.
+5. Results and logs are updated and polled by the UI.
+6. User can update triggers, upload images for direct inference, or monitor system health.
+
+---
 
 ## Setup and Installation
 
-Refer to `TASKS.md` for detailed initial setup steps, including:
+1. **Install Ollama CLI**
+   - See [ollama.com](https://ollama.com/) for your OS.
+2. **Download VLM Models**
+   - Small: `ollama pull qwen2.5vl:3b`
+   - Large: `ollama pull qwen2.5vl:7b`
+3. **Set up Python Virtual Environment**
+   - `python3 -m venv venv`
+   - `source venv/bin/activate`
+4. **Install Python Dependencies**
+   - `pip install -r requirements.txt`
 
-1.  **Install Ollama CLI**:
-    *   Follow instructions on [ollama.com](https://ollama.com/) for your OS.
-    *   Example for Linux: `sudo apt update && sudo apt install ollama`
-2.  **Download VLM Models**:
-    *   Small model: `ollama pull qwen2.5vl:3b`
-    *   Large model: `ollama pull qwen2.5vl:7b`
-    *   Verify models are available: `ollama list`
-3.  **Set up Python Virtual Environment**:
-    *   `python3 -m venv venv`
-    *   `source venv/bin/activate`
-4.  **Install Python Dependencies**:
-    *   A `requirements.txt` will be provided. For now, core dependencies are:
-        `pip install fastapi uvicorn pydantic opencv-python numpy pytest typeguard python-multipart`
-    *   If you encounter issues with `opencv-python`, you might need `opencv-python-headless` for server environments.
+---
 
 ## Running the Application
 
-1.  **Ensure Ollama Service is Running:**
-    *   Start the Ollama service (e.g., `sudo systemctl start ollama` on Linux, or run the Ollama desktop application).
-2.  **Activate Virtual Environment:**
-    *   `source venv/bin/activate`
-3.  **Start the FastAPI Server:**
-    *   `python app.py`
-    *   Or using Uvicorn directly for more options: `uvicorn app:app --host 0.0.0.0 --port 8000 --reload`
-    *   The API will typically be available at `http://localhost:8000`.
-    *   Check the `/health` endpoint (`http://localhost:8000/health`) to verify service and model status.
+1. **Ensure Ollama Service is Running**
+2. **Activate Virtual Environment**
+3. **Start the FastAPI Server**
+   - `python app.py` or `uvicorn app:app --host 0.0.0.0 --port 8000 --reload`
+   - API at `http://localhost:8000` (see `/docs` for OpenAPI)
+4. **Start the Gradio UI**
+   - `python gradio_runner.py`
+   - UI at `http://localhost:7860`
 
-### Launching the Gradio UI
+---
 
-A user-friendly Gradio web interface is available for interacting with the VLM Camera Application. The Gradio app allows you to:
+## Configuration: `config.yaml`
 
-- Select a video source (webcam or upload a video file)
-- Enter or update trigger descriptions
-- Start/stop orchestration and monitor status
-- View logs and the latest inference results (including images and text)
-- Run large model inference on uploaded images
-
-**To launch the Gradio app:**
-
-1. **Activate your virtual environment:**
-    ```sh
-    source venv/bin/activate
-    ```
-2. **Start the Gradio UI:**
-    ```sh
-    python gradio_runner.py
-    ```
-3. **Access the UI:**
-    - Open your browser and go to the address shown in the terminal (typically `http://localhost:7860`).
-
-The Gradio app communicates with the FastAPI backend and uses the settings from `config.yaml`.
-
-### Configuration: `config.yaml`
-
-The application is configured via a single YAML file, `config.yaml`, located in the project root. This file controls model selection, server addresses, and default triggers for inference.
-
-Example structure:
+Controls model selection, server addresses, and default triggers. Example:
 
 ```yaml
 small_model:
@@ -123,50 +99,43 @@ default_triggers:
   - "a test pattern"
 ```
 
-- **small_model / large_model**: Specify the model name and the Ollama server endpoint for each model. You can point the large model to a remote server if needed.
-- **server_ips**: Set the backend (FastAPI) and Gradio UI addresses. These are used for internal communication.
-- **default_triggers**: List of default trigger descriptions available in the UI.
-
-**To customize:**
-- Change model names or server addresses as needed for your deployment.
-- Add or modify triggers to suit your use case.
-
-The Gradio app and backend both read from this file at startup.
+---
 
 ## Running Tests
 
-1.  **Activate Virtual Environment**:
-    *   `source venv/bin/activate`
-2.  **Run Pytest**:
-    *   From the project root directory: `python -m pytest`
-    *   Or: `venv/bin/python -m pytest`
+1. **Activate Virtual Environment**
+2. **Run Pytest**
+   - `python -m pytest` or `venv/bin/python -m pytest`
+
+---
 
 ## API Endpoints
 
-(Details can be found via the auto-generated OpenAPI docs at `http://localhost:8000/docs` when the API is running)
+- **GET /**: Welcome message.
+- **GET /health**: Health check for the service and models.
+- **POST /start**: Starts or restarts the video processing orchestration.
+- **PUT /trigger**: Updates the trigger for the active orchestration.
+- **POST /infer/small**: Directly runs small VLM inference on the uploaded image.
+- **POST /infer/large**: Directly runs large VLM inference on the uploaded image.
 
-*   **GET /**: Welcome message.
-*   **GET /health**: Health check for the service and models.
-*   **POST /start**:
-    *   Body: `{"source": "your_video_source_uri", "trigger": "your_trigger_description"}`
-    *   Starts or restarts the video processing orchestration.
-*   **PUT /trigger**:
-    *   Body: `{"trigger": "new_trigger_description"}`
-    *   Updates the trigger for the active orchestration.
-*   **POST /infer/small**:
-    *   Form data: `trigger` (string), `image` (file upload)
-    *   Directly runs small VLM inference on the uploaded image.
-*   **POST /infer/large**:
-    *   Form data: `image` (file upload)
-    *   Directly runs large VLM inference on the uploaded image.
+See `/docs` when running for full OpenAPI documentation.
 
-## TODO / Future Enhancements
+---
 
-*   Generate `requirements.txt`.
-*   Integrate with a Grad.io UI (as per `TASKS.md`).
-*   Implement true I-frame detection in `video_source.py`.
-*   More robust error handling and logging.
-*   Database integration for storing inference results or events.
+## Troubleshooting & FAQ
+
+- **Large files:** Model weights and test videos are not tracked in Git. See `.gitignore`.
+- **Ollama errors:** Ensure the Ollama service is running and models are pulled.
+- **Webcam/RTSP issues:** Check device permissions and network connectivity.
+- **Tests failing:** Ensure all dependencies are installed and the virtual environment is active.
+
+---
+
+## Contributing
+
+See `PLANNING.md` and `TASKS.md` for architecture, style, and open tasks.
+
+---
 
 # Setting Up an Ollama Server for Remote REST API Access
 

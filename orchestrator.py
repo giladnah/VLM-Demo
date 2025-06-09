@@ -1,8 +1,12 @@
-"""Module for orchestrating the video processing pipeline."""
+"""
+Orchestrator for the VLM Camera Service video processing pipeline.
+
+Handles video stream acquisition, frame grabbing, buffering, inference (small and large models), and trigger logic using threading and multiprocessing.
+"""
 
 import time
 import threading
-from typing import Optional, List
+from typing import Optional, List, Any
 import os
 import subprocess
 import cv2
@@ -20,17 +24,31 @@ FRAME_GRAB_INTERVAL = 1/30
 BUFFER_GRAB_INTERVAL = 1/5  # Example: update buffer every 0.2s (5 FPS), adjust as needed
 
 class OrchestrationConfig:
-    """Configuration for an orchestration task, allowing dynamic updates."""
+    """
+    Configuration for an orchestration task, allowing dynamic updates.
+    """
     def __init__(self, source_uri: str, initial_trigger_description: str):
         self.source_uri = source_uri
         self._trigger_description = initial_trigger_description
         self._lock = threading.Lock()
 
     def get_trigger_description(self) -> str:
+        """
+        Returns the current trigger description (thread-safe).
+
+        Returns:
+            str: The current trigger description.
+        """
         with self._lock:
             return self._trigger_description
 
     def set_trigger_description(self, new_description: str) -> None:
+        """
+        Updates the trigger description if it has changed (thread-safe).
+
+        Args:
+            new_description (str): The new trigger description.
+        """
         with self._lock:
             if self._trigger_description != new_description:
                 self._trigger_description = new_description
@@ -40,6 +58,9 @@ class OrchestrationConfig:
 
 # --- Top-level inference worker process for multiprocessing ---
 def inference_worker_process(input_queue, output_queue, stop_event, config):
+    """
+    Worker process for running small and large inference in a separate process.
+    """
     import time
     from inference_small import run_small_inference
     from inference_large import run_large_inference, LargeInferenceOutput
@@ -77,8 +98,11 @@ def inference_worker_process(input_queue, output_queue, stop_event, config):
     print("[Orchestrator] [InferenceProcess] Exiting.")
 
 class Orchestrator:
-    """Singleton orchestrator for video processing pipeline."""
-    def __init__(self):
+    """
+    Singleton orchestrator for the video processing pipeline.
+    Manages video stream, frame grabbing, buffering, inference, and result handling.
+    """
+    def __init__(self) -> None:
         self.latest_small_inference_frame_path = "latest_small_inference.jpg"
         self.latest_small_inference_lock = threading.Lock()
         self.latest_small_inference_result = None
@@ -103,7 +127,13 @@ class Orchestrator:
         self.current_frame_lock = threading.Lock()
         self.last_inference_frame = None
 
-    def start(self, config: OrchestrationConfig):
+    def start(self, config: OrchestrationConfig) -> None:
+        """
+        Starts the orchestration process with the given configuration.
+
+        Args:
+            config (OrchestrationConfig): The orchestration configuration.
+        """
         self.stop()  # Stop any existing orchestration
         self._config = config
         self._stop_event = threading.Event()
@@ -125,7 +155,10 @@ class Orchestrator:
         self._processing_thread.start()
         self._inference_process.start()
 
-    def stop(self):
+    def stop(self) -> None:
+        """
+        Stops the orchestration process and cleans up resources.
+        """
         if self._stop_event is not None:
             self._stop_event.set()
         if self._inference_stop_event is not None:
@@ -144,7 +177,16 @@ class Orchestrator:
             self._video_stream.release()
             self._video_stream = None
 
-    def _frame_grabber(self, video_stream, frame_buffer, buffer_lock, stop_event):
+    def _frame_grabber(self, video_stream: VideoStream, frame_buffer: FrameBuffer, buffer_lock: threading.Lock, stop_event: threading.Event) -> None:
+        """
+        Grabs frames from the video stream and updates the buffer in a separate thread.
+
+        Args:
+            video_stream (VideoStream): The video stream object.
+            frame_buffer (FrameBuffer): The frame buffer.
+            buffer_lock (threading.Lock): Lock for buffer access.
+            stop_event (threading.Event): Event to signal stopping.
+        """
         print("[FrameGrabber] INFO: Starting frame grabber thread.")
         last_buffer_update = time.time()
         while not stop_event.is_set():
@@ -166,7 +208,10 @@ class Orchestrator:
             time.sleep(FRAME_GRAB_INTERVAL)
         print("[FrameGrabber] INFO: Frame grabber thread exiting.")
 
-    def _orchestrate_processing(self):
+    def _orchestrate_processing(self) -> None:
+        """
+        Main orchestration loop: connects to video source, manages frame grabbing, inference, and result handling.
+        """
         try:
             source_uri = self._config.source_uri
             print(f"[Orchestrator] INFO: Attempting to connect to video source: {source_uri}")
@@ -207,10 +252,6 @@ class Orchestrator:
                 except Exception as e:
                     print(f"[Orchestrator] WARN: Could not queue frame for inference process: {e}")
 
-                # # Write the last inference frame to disk for UI
-                # if self.last_inference_frame is not None:
-                #     cv2.imwrite(self.latest_small_inference_frame_path, self.last_inference_frame)
-
                 # Check for new inference results from the process
                 if self._inference_output_queue is not None:
                     try:
@@ -237,8 +278,13 @@ class Orchestrator:
                 self._video_stream = None
             print("[Orchestrator] INFO: Processing finished.")
 
-    def _handle_inference_result(self, result):
-        # Called in main process to update shared state from inference process results
+    def _handle_inference_result(self, result: dict) -> None:
+        """
+        Handles inference results from the worker process and updates shared state.
+
+        Args:
+            result (dict): Inference result payload.
+        """
         small_inference_out = result.get("result")
         frame = result.get("frame")
         trigger = result.get("trigger")
@@ -262,13 +308,25 @@ class Orchestrator:
         else:
             print("[Orchestrator] [Main] WARN: Small inference failed or returned no result.")
 
-    def get_latest_small_inference_frame(self):
+    def get_latest_small_inference_frame(self) -> Optional[Any]:
         """
         Returns the latest frame used for small inference as a numpy array (in-memory).
+
+        Returns:
+            Optional[Any]: Latest frame or None.
         """
         return self.last_inference_frame
 
-    def get_latest_small_inference_result(self, clear_status: bool = True):
+    def get_latest_small_inference_result(self, clear_status: bool = True) -> Optional[dict]:
+        """
+        Returns the latest small inference result.
+
+        Args:
+            clear_status (bool, optional): Whether to clear the new result status. Defaults to True.
+
+        Returns:
+            Optional[dict]: Latest result or None.
+        """
         with self.latest_small_inference_result_lock:
             result = self.latest_small_inference_result
         if clear_status:
@@ -276,11 +334,26 @@ class Orchestrator:
                 self.new_small_result_available = False
         return result
 
-    def get_latest_small_inference_result_str(self):
+    def get_latest_small_inference_result_str(self) -> Optional[str]:
+        """
+        Returns the latest small inference result as a string.
+
+        Returns:
+            Optional[str]: Latest result string or None.
+        """
         with self.latest_small_inference_result_lock:
             return self.latest_small_inference_result_str
 
-    def get_latest_large_inference_result(self, clear_status: bool = True):
+    def get_latest_large_inference_result(self, clear_status: bool = True) -> Optional[dict]:
+        """
+        Returns the latest large inference result.
+
+        Args:
+            clear_status (bool, optional): Whether to clear the new result status. Defaults to True.
+
+        Returns:
+            Optional[dict]: Latest result or None.
+        """
         with self.latest_large_inference_result_lock:
             result = self.latest_large_inference_result
         if clear_status:
@@ -288,7 +361,13 @@ class Orchestrator:
                 self.new_large_result_available = False
         return result
 
-    def get_results_status(self):
+    def get_results_status(self) -> dict:
+        """
+        Returns the status of new inference results.
+
+        Returns:
+            dict: Status of small and large inference results.
+        """
         with self.result_status_lock:
             return {
                 "small": self.new_small_result_available,

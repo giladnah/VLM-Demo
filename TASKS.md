@@ -63,3 +63,47 @@ Use this checklist to track progress on building the VLM Camera Application.
   * Accept image payload, call `run_small_inference`, return result.
 * [x] **Implement `/infer/large` endpoint** (2024-07-15)
 * [x] **Implement `/health` endpoint** (2024-07-15)
+
+## Discovered During Work
+
+* [ ] **Unit tests for `video_source.py`**
+  * Test VideoStream with file and RTSP sources (mock OpenCV).
+  * Test frame looping, release, FPS/size getters.
+* [ ] **Unit tests for `buffer.py`**
+  * Test buffer initialization, update, overflow, and type safety.
+* [ ] **Additional orchestrator tests**
+  * Buffer operation exceptions.
+  * extract_i_frame exceptions.
+  * Integration/performance: test with different interval constants.
+* [ ] **Smoke/integration test for `gradio_runner.py`**
+  * Test API connectivity and basic UI flow (can be minimal).
+
+## Code Review, Documentation, and Test Coverage
+
+* [x] **buffer.py**
+  * [x] Review code and improve documentation
+  * [x] Build or improve unit tests
+* [x] **app.py**
+  * [x] Review code and improve documentation
+  * [x] Build or improve API/integration tests
+* [x] **gradio_runner.py**
+  * [x] Review code and improve documentation
+  * [x] Build or improve smoke/integration tests
+* [x] **orchestrator.py**
+  * [x] Review code and improve documentation
+  * [ ] Build or improve unit/integration tests
+* [x] **inference_small.py**
+  * [x] Review code and improve documentation
+  * [x] Build or improve unit tests
+* [x] **inference_large.py**
+  * [x] Review code and improve documentation
+  * [x] Build or improve unit tests
+* [x] **trigger.py**
+  * [x] Review code and improve documentation
+  * [x] Build or improve unit tests
+* [x] **config.py**
+  * [x] Review code and improve documentation
+  * [x] Build or improve unit tests
+* [x] **video_source.py**
+  * [x] Review code and improve documentation
+  * [x] Build or improve unit tests
