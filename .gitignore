@@ -75,3 +75,6 @@ Thumbs.db
 
 test_examples/
 hailort.log
+
+hefs_and_embeddings/*.hef
+hefs_and_embeddings/*.npy
