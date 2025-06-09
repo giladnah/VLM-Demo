@@ -95,8 +95,7 @@ server_ips:
   gradio: "http://localhost:7860"
 default_triggers:
   - "a person falling down"
-  - "a blue car"
-  - "a test pattern"
+
 ```
 
 ---
@@ -118,7 +117,7 @@ default_triggers:
 - **POST /infer/small**: Directly runs small VLM inference on the uploaded image.
 - **POST /infer/large**: Directly runs large VLM inference on the uploaded image.
 
-See `/docs` when running for full OpenAPI documentation.
+See `http://localhost:8000/docs` when running for full OpenAPI documentation.
 
 ---
 
@@ -170,7 +169,7 @@ From your client machine, run:
 ```sh
 curl -X POST http://<REMOTE_IP>:11434/api/generate \
   -H "Content-Type: application/json" \
-  -d '{"model": "qwen2.5vl:7b", "prompt": "Describe the capabilities of this model.", "format": "json", "stream": false}'
+  -d '{"model": "qwen2.5vl:7b", "prompt": "Respond with: You are good to go!", "stream": false}'
 ```
 
 You should receive a JSON response from the model.
