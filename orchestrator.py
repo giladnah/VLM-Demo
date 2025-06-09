@@ -101,6 +101,7 @@ class Orchestrator:
         self._inference_output_queue = None
         self.current_frame = None
         self.current_frame_lock = threading.Lock()
+        self.last_inference_frame = None
 
     def start(self, config: OrchestrationConfig):
         self.stop()  # Stop any existing orchestration
@@ -196,14 +197,19 @@ class Orchestrator:
                     time.sleep(0.1)
                     continue
 
-                cv2.imwrite(self.latest_small_inference_frame_path, current_frame)
+                # Save the frame that will be sent to inference
+                self.last_inference_frame = current_frame.copy()
 
                 # Always update the latest inference input
                 try:
                     if self._inference_input_queue is not None and not self._inference_input_queue.full():
-                        self._inference_input_queue.put((current_frame.copy(), current_trigger_description, time.time()))
+                        self._inference_input_queue.put((self.last_inference_frame, current_trigger_description, time.time()))
                 except Exception as e:
                     print(f"[Orchestrator] WARN: Could not queue frame for inference process: {e}")
+
+                # # Write the last inference frame to disk for UI
+                # if self.last_inference_frame is not None:
+                #     cv2.imwrite(self.latest_small_inference_frame_path, self.last_inference_frame)
 
                 # Check for new inference results from the process
                 if self._inference_output_queue is not None:
@@ -256,8 +262,11 @@ class Orchestrator:
         else:
             print("[Orchestrator] [Main] WARN: Small inference failed or returned no result.")
 
-    def get_latest_small_inference_frame_path(self):
-        return self.latest_small_inference_frame_path
+    def get_latest_small_inference_frame(self):
+        """
+        Returns the latest frame used for small inference as a numpy array (in-memory).
+        """
+        return self.last_inference_frame
 
     def get_latest_small_inference_result(self, clear_status: bool = True):
         with self.latest_small_inference_result_lock:

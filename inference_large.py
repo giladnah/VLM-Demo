@@ -37,7 +37,7 @@ def run_large_inference(
     timeout_seconds: int = 90,
     ollama_url: str = OLLAMA_URL_DEFAULT,
     retry_count: int = MAX_RETRIES,
-    max_image_size: int = 640,
+    max_image_size: int = 616,
     jpeg_quality: int = 90,
     retry_cooldown: int = 5,
     reset_between_retries: bool = False

@@ -9,7 +9,7 @@ import cv2
 import numpy as np
 import subprocess # For health check
 import json # For parsing ollama list output
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from orchestrator import orchestrator, OrchestrationConfig
 from inference_small import run_small_inference as run_small_inference_direct, MODEL_NAME_DEFAULT as SMALL_MODEL_NAME
@@ -366,8 +366,19 @@ async def direct_large_inference(image: UploadFile = File(...), model_name: Opti
 
 @app.get("/latest-small-inference-frame", tags=["Debug"], summary="Get the latest frame used for small inference.")
 def get_latest_small_inference_frame():
-    # No lock needed, handled internally
-    return FileResponse(orchestrator.get_latest_small_inference_frame_path(), media_type="image/jpeg")
+    # Return the in-memory numpy array as a JPEG image
+    frame = orchestrator.get_latest_small_inference_frame()
+    if frame is None:
+        raise HTTPException(status_code=404, detail="No inference frame available.")
+    import cv2
+    import io
+    import numpy as np
+    # Convert BGR to RGB if needed for display (Gradio can handle BGR, but browsers expect RGB)
+    # frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    success, img_encoded = cv2.imencode('.jpg', frame)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to encode image.")
+    return StreamingResponse(io.BytesIO(img_encoded.tobytes()), media_type="image/jpeg")
 
 @app.get("/results_status", tags=["Debug"], summary="Get the status of available inference results.")
 def get_results_status():

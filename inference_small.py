@@ -80,7 +80,7 @@ def run_small_inference(
     timeout_seconds: int = 60,
     ollama_url: str = OLLAMA_URL_DEFAULT,
     retry_count: int = MAX_RETRIES,
-    max_image_size: int = 224,
+    max_image_size: int = 280,
     jpeg_quality: int = 90,
     retry_cooldown: int = 5,  # Seconds to wait between retries to let server recover
     reset_between_retries: bool = True  # Whether to try resetting server between retries
