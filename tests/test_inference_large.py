@@ -8,8 +8,22 @@ import pytest
 import numpy as np
 import os
 import sys
+import yaml
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from inference.unified import run_unified_inference
+
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), '..', 'config.yaml')
+
+def validate_large_model_config():
+    try:
+        with open(CONFIG_PATH, 'r') as f:
+            config = yaml.safe_load(f)
+        large_model = config.get('large_model', {})
+        if not large_model.get('name'):
+            raise ValueError('large_model.name is not set in config.yaml')
+        return large_model['name']
+    except Exception as e:
+        raise RuntimeError(f'Failed to validate large_model config: {e}')
 
 @pytest.fixture
 def dummy_image_frame_large() -> np.ndarray:

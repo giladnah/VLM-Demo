@@ -8,9 +8,24 @@ import pytest
 import numpy as np
 import sys
 import os
+import yaml
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from inference.unified import run_unified_inference
 from inference.ollama_engine import OllamaError
+
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), '..', 'config.yaml')
+
+def validate_small_model_config():
+    try:
+        with open(CONFIG_PATH, 'r') as f:
+            config = yaml.safe_load(f)
+        small_model = config.get('small_model', {})
+        if not small_model.get('name'):
+            raise ValueError('small_model.name is not set in config.yaml')
+        engine = small_model.get('engine', 'ollama')
+        return small_model['name'], engine
+    except Exception as e:
+        raise RuntimeError(f'Failed to validate small_model config: {e}')
 
 @pytest.fixture
 def dummy_image_frame() -> np.ndarray:

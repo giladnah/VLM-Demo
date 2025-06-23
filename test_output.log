@@ -29,12 +29,12 @@ tests/test_inference.py::test_ollama_engine_process_frame PASSED         [ 48%]
 tests/test_inference.py::test_unified_inference_lifecycle PASSED         [ 51%]
 tests/test_inference.py::test_unified_inference_process_frame PASSED     [ 53%]
 tests/test_inference.py::test_ollama_engine_error_handling PASSED        [ 56%]
-tests/test_inference_large.py::test_successful_large_inference SKIPPED   [ 58%]
+tests/test_inference_large.py::test_successful_large_inference PASSED    [ 58%]
 tests/test_inference_large.py::test_large_inference_edge_case PASSED     [ 60%]
-tests/test_inference_large.py::test_large_inference_failure_case SKIPPED [ 63%]
-tests/test_inference_small.py::test_successful_inference SKIPPED (Co...) [ 65%]
+tests/test_inference_large.py::test_large_inference_failure_case PASSED  [ 63%]
+tests/test_inference_small.py::test_successful_inference PASSED          [ 65%]
 tests/test_inference_small.py::test_inference_edge_case PASSED           [ 68%]
-tests/test_inference_small.py::test_inference_failure_case SKIPPED (...) [ 70%]
+tests/test_inference_small.py::test_inference_failure_case PASSED        [ 70%]
 tests/test_openai_engine.py::test_openai_engine_initialization PASSED    [ 73%]
 tests/test_openai_engine.py::test_openai_engine_process_frame PASSED     [ 75%]
 tests/test_openai_engine.py::test_openai_engine_error_handling PASSED    [ 78%]
@@ -54,4 +54,4 @@ venv/lib/python3.10/site-packages/websockets/legacy/__init__.py:6
     warnings.warn(  # deprecated in 14.0 - 2024-11-09
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
-=================== 37 passed, 4 skipped, 1 warning in 7.41s ===================
+======================== 41 passed, 1 warning in 13.53s ========================
