@@ -18,10 +18,16 @@ from video_source import get_video_stream, extract_i_frame, VideoStream, ImageFr
 from buffer import init_frame_buffer, update_buffer, FrameBuffer
 from inference.unified import run_unified_inference
 from trigger import evaluate_trigger
+from config import get_config
 
 BUFFER_SIZE = 10
 FRAME_GRAB_INTERVAL = 1/30
 BUFFER_GRAB_INTERVAL = 1/5  # Example: update buffer every 0.2s (5 FPS), adjust as needed
+
+# --- Batch mode config (set in start) ---
+BATCH_MODE_ENABLED = False
+BATCH_SIZE = 1
+BATCH_MIN_TIME_DIFF = 0.0
 
 class OrchestrationConfig:
     """
@@ -63,12 +69,30 @@ def inference_worker_process(input_queue, output_queue, stop_event, config):
     Uses the unified inference system (run_unified_inference).
     Old run_small_inference/run_large_inference are deprecated.
     """
+    import cv2
+    import os
+    # --- Batch mode config from orchestrator ---
+    batch_mode_enabled = config.get("batch_mode_enabled", False)
+    batch_size = config.get("batch_size", 1)
+    # Debug save frames feature
+    debug_save_frames = False
+    try:
+        debug_save_frames = get_config().get('debug_save_frames', False)
+    except Exception:
+        pass
+    # Local buffer for batch mode
+    rolling_frame_buffer = []
     while not stop_event.is_set():
         try:
             frame, trigger_description, timestamp = input_queue.get(timeout=1)
         except Exception:
             continue
-        # Run small inference
+        # Maintain rolling buffer for batch mode
+        if batch_mode_enabled and batch_size > 1:
+            rolling_frame_buffer.append(frame)
+            if len(rolling_frame_buffer) > batch_size:
+                rolling_frame_buffer = rolling_frame_buffer[-batch_size:]
+        # Run small inference (always single frame)
         print(f"[Orchestrator] [InferenceProcess] Running small inference for trigger: '{trigger_description}' (unified engine)")
         try:
             small_result = asyncio.run(run_unified_inference(
@@ -77,6 +101,12 @@ def inference_worker_process(input_queue, output_queue, stop_event, config):
                 model_type="small"
             ))
             small_inference_out = small_result.result
+            # Debug: Save latest small inference frame
+            if debug_save_frames:
+                try:
+                    cv2.imwrite("small_infer_latest.jpg", frame)  # type: ignore[attr-defined]
+                except Exception as e:
+                    print(f"[DEBUG] Failed to save small inference frame: {e}")
         except Exception as e:
             print(f"[Orchestrator] [InferenceProcess] Small inference failed: {e}")
             small_inference_out = None
@@ -93,11 +123,33 @@ def inference_worker_process(input_queue, output_queue, stop_event, config):
         if small_inference_out == "yes":
             print(f"[Orchestrator] [InferenceProcess] Trigger MET. Running large inference (unified engine)")
             try:
-                large_result = asyncio.run(run_unified_inference(
-                    frame,
-                    trigger_description,
-                    model_type="large"
-                ))
+                if batch_mode_enabled and batch_size > 1:
+                    batch_frames = list(rolling_frame_buffer)
+                    print(f"[Orchestrator] [InferenceProcess] Sending batch of {len(batch_frames)} frames for large inference.")
+                    # Debug: Save all batch frames
+                    if debug_save_frames:
+                        for idx, f in enumerate(batch_frames):
+                            try:
+                                cv2.imwrite(f"large_infer_batch_{idx}.jpg", f)  # type: ignore[attr-defined]
+                            except Exception as e:
+                                print(f"[DEBUG] Failed to save large batch frame {idx}: {e}")
+                    large_result = asyncio.run(run_unified_inference(
+                        batch_frames,
+                        trigger_description,
+                        model_type="large"
+                    ))
+                else:
+                    # Debug: Save single large inference frame
+                    if debug_save_frames:
+                        try:
+                            cv2.imwrite("large_infer_latest.jpg", frame)  # type: ignore[attr-defined]
+                        except Exception as e:
+                            print(f"[DEBUG] Failed to save large inference frame: {e}")
+                    large_result = asyncio.run(run_unified_inference(
+                        frame,
+                        trigger_description,
+                        model_type="large"
+                    ))
                 print(f"[Orchestrator] [InferenceProcess] Large inference result - Result: '{large_result.result}', Analysis: '{large_result.detailed_analysis[:100]}...'")
                 # Send a second payload with large inference result
                 result_payload_large = {
@@ -152,9 +204,6 @@ class Orchestrator:
     def start(self, config: OrchestrationConfig) -> None:
         """
         Starts the orchestration process with the given configuration.
-
-        Args:
-            config (OrchestrationConfig): The orchestration configuration.
         """
         self.stop()  # Stop any existing orchestration
         self._config = config
@@ -163,11 +212,42 @@ class Orchestrator:
         self._inference_input_queue = multiprocessing.Queue(maxsize=2)
         self._inference_output_queue = multiprocessing.Queue(maxsize=2)
         self._processing_thread = threading.Thread(target=self._orchestrate_processing, daemon=True)
+        # --- Batch mode config logic ---
+        global BUFFER_SIZE, BUFFER_GRAB_INTERVAL, BATCH_MODE_ENABLED, BATCH_SIZE, BATCH_MIN_TIME_DIFF
+        config_yaml = get_config()
+        large_model_cfg = config_yaml.get('large_model', {})
+        engine = large_model_cfg.get('engine', 'ollama').lower()
+        batch_cfg = large_model_cfg.get('batch_inference', {})
+        if batch_cfg.get('enabled', False):
+            if engine == 'openai':
+                BATCH_MODE_ENABLED = True
+                BATCH_SIZE = int(batch_cfg.get('batch_size', 5))
+                BATCH_MIN_TIME_DIFF = float(batch_cfg.get('min_time_diff_seconds', 2))
+                BUFFER_SIZE = max(BATCH_SIZE, 10)
+                BUFFER_GRAB_INTERVAL = BATCH_MIN_TIME_DIFF
+                print(f"[Orchestrator] INFO: Batch mode enabled for large inference (OpenAI). Batch size: {BATCH_SIZE}, min_time_diff: {BATCH_MIN_TIME_DIFF}s")
+            else:
+                print("[Orchestrator] WARNING: Batch mode enabled but engine is not OpenAI. Ignoring batch mode.")
+                BATCH_MODE_ENABLED = False
+                BATCH_SIZE = 1
+                BATCH_MIN_TIME_DIFF = 0.0
+                BUFFER_SIZE = 10
+                BUFFER_GRAB_INTERVAL = 1/5
+        else:
+            BATCH_MODE_ENABLED = False
+            BATCH_SIZE = 1
+            BATCH_MIN_TIME_DIFF = 0.0
+            BUFFER_SIZE = 10
+            BUFFER_GRAB_INTERVAL = 1/5
         config_dict = {
             "small_model_name": getattr(config, "small_model_name", None),
             "small_ollama_server": getattr(config, "small_ollama_server", None),
             "large_model_name": getattr(config, "large_model_name", None),
             "large_ollama_server": getattr(config, "large_ollama_server", None),
+            # Pass batch mode settings to inference worker
+            "batch_mode_enabled": BATCH_MODE_ENABLED,
+            "batch_size": BATCH_SIZE,
+            "batch_min_time_diff": BATCH_MIN_TIME_DIFF,
         }
         self._inference_process = multiprocessing.Process(
             target=inference_worker_process,

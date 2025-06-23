@@ -107,6 +107,20 @@ Use this checklist to track progress on building the VLM Camera Application.
 * [x] **Update or remove docs/inference/engine.md** (empty or redundant)
 * [x] **Update or remove references to Hailo unless specifically planned**
 
+## Batch Large Inference (OpenAI Only)
+
+* [x] Add `batch_inference` config section under `large_model` in `config.yaml`
+* [x] Update config parsing and validation for batch mode (OpenAI only)
+* [x] Update large inference logic to use batch when enabled and engine is OpenAI
+* [x] Adapt OpenAI engine and prompt for batch image input
+* [x] Log warning and ignore batch mode if engine is not OpenAI
+* [x] Update documentation for batch inference mode
+* [ ] Add unit/integration tests for batch mode and fallback logic
+
+## Debug Features
+
+* [x] Add debug feature to save latest small/large inference frames (and batch frames) to files when enabled in config
+
 ## Future Tasks
 * [ ] **Hailo Integration** (if/when planned)
   * [ ] Research Hailo API requirements

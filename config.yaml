@@ -9,9 +9,15 @@ large_model:
   # ollama_server: http://10.41.74.178:11434
 
   # ollama_server: http://localhost:11434
-  name: gpt-4o  # Use OpenAI GPT-4o (vision)
+  # name: gpt-4o  # Use OpenAI GPT-4o (vision)
+  name: gpt-4o-mini  # Use OpenAI GPT-4o (vision)
   engine: openai  # options: openai, ollama
   # If engine: openai, the OpenAI API key must be set in the environment or .env file
+  batch_inference:
+    enabled: true           # Enable batch mode for large inference (OpenAI only)
+    batch_size: 4           # Number of images to send in a batch
+    min_time_diff_seconds: 0.5 # Minimum time difference between images in the batch
+
 server_ips:
   backend: "http://localhost:8000"
   gradio: "http://localhost:7860"
@@ -27,3 +33,6 @@ rtsp_cameras:
     username: "root"
     password: "hailo"
 
+# --- Debugging ---
+
+debug_save_frames: true
