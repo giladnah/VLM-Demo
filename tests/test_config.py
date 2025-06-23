@@ -24,7 +24,10 @@ def test_config_loads():
     assert 'name' in config['small_model']
     assert 'ollama_server' in config['small_model']
     assert 'name' in config['large_model']
-    assert 'ollama_server' in config['large_model']
+    # Only require 'ollama_server' for large_model if engine is ollama or not set
+    engine = config['large_model'].get('engine', 'ollama').lower()
+    if engine == 'ollama':
+        assert 'ollama_server' in config['large_model']
     assert 'server_ips' in config
     assert 'backend' in config['server_ips']
     assert 'default_triggers' in config

@@ -3,7 +3,7 @@
 import threading
 from fastapi import FastAPI, BackgroundTasks, HTTPException, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional
 import cv2
 import numpy as np
@@ -73,24 +73,26 @@ class StartRequest(BaseModel):
     large_model_name: Optional[str] = None
     large_ollama_server: Optional[str] = None
 
-    class Config:
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "source": "rtsp://user:pass@ip_address:port/path",
                 "trigger": "a person wearing a red hat"
             }
         }
+    )
 
 class UpdateTriggerRequest(BaseModel):
     """Request model for the /trigger endpoint."""
     trigger: str = Field(..., description="The new textual trigger description.")
 
-    class Config:
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "trigger": "a blue car"
             }
         }
+    )
 
 @app.get("/", tags=["Root"], summary="Root path with a welcome message.")
 async def read_root() -> dict:

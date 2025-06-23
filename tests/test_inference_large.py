@@ -15,13 +15,22 @@ from inference.unified import run_unified_inference
 def dummy_image_frame_large() -> np.ndarray:
     return np.zeros((100, 100, 3), dtype=np.uint8)
 
-def test_successful_large_inference(dummy_image_frame_large):
-    """Test a successful large model inference call (integration test)."""
+@pytest.mark.asyncio
+async def test_successful_large_inference(dummy_image_frame_large):
     try:
-        result = run_unified_inference(dummy_image_frame_large, "a cat on a couch", model_type="large")
+        model = validate_large_model_config()
+        if not os.environ.get("OPENAI_API_KEY"):
+            reason = "OPENAI_API_KEY not set"
+            print(f"[WARN] {reason}")
+            pytest.skip(reason)
+    except Exception as e:
+        pytest.skip(f"Config or environment not available: {e}")
+    try:
+        result = await run_unified_inference(dummy_image_frame_large, "a cat on a couch", model_type="large")
         assert result.result in ("yes", "no")
         assert isinstance(result.detailed_analysis, str)
     except Exception as e:
+        print(f"[DEBUG] Exception in test_successful_large_inference: {e}")
         pytest.skip(f"Engine not available or config missing: {e}")
 
 @pytest.mark.asyncio
@@ -33,10 +42,19 @@ async def test_large_inference_edge_case(dummy_image_frame_large):
     result = await run_unified_inference(dummy_image_frame_large, "", model_type="large")
     assert result is None or hasattr(result, 'result')
 
-def test_large_inference_failure_case(dummy_image_frame_large):
-    """Test failure case: nonsense trigger (should still return yes/no, not error)."""
+@pytest.mark.asyncio
+async def test_large_inference_failure_case(dummy_image_frame_large):
     try:
-        result = run_unified_inference(dummy_image_frame_large, "nonsense_trigger_1234567890", model_type="large")
+        model = validate_large_model_config()
+        if not os.environ.get("OPENAI_API_KEY"):
+            reason = "OPENAI_API_KEY not set"
+            print(f"[WARN] {reason}")
+            pytest.skip(reason)
+    except Exception as e:
+        pytest.skip(f"Config or environment not available: {e}")
+    try:
+        result = await run_unified_inference(dummy_image_frame_large, "nonsense_trigger_1234567890", model_type="large")
         assert result.result in ("yes", "no")
     except Exception as e:
+        print(f"[DEBUG] Exception in test_large_inference_failure_case: {e}")
         pytest.skip(f"Engine not available or config missing: {e}")

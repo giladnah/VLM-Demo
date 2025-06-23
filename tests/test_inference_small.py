@@ -17,12 +17,17 @@ def dummy_image_frame() -> np.ndarray:
     """Provides a consistent dummy image frame (NumPy array) for tests."""
     return np.zeros((100, 100, 3), dtype=np.uint8)
 
-def test_successful_inference(dummy_image_frame):
-    """Test a successful small model inference call (integration test)."""
+@pytest.mark.asyncio
+async def test_successful_inference(dummy_image_frame):
     try:
-        result = run_unified_inference(dummy_image_frame, "a cat on a couch", model_type="small")
+        model, engine = validate_small_model_config()
+    except Exception as e:
+        pytest.skip(f"Config or environment not available: {e}")
+    try:
+        result = await run_unified_inference(dummy_image_frame, "a cat on a couch", model_type="small")
         assert result.result in ("yes", "no")
     except Exception as e:
+        print(f"[DEBUG] Exception in test_successful_inference: {e}")
         pytest.skip(f"Engine not available or config missing: {e}")
 
 @pytest.mark.asyncio
@@ -34,10 +39,15 @@ async def test_inference_edge_case(dummy_image_frame):
     except OllamaError as e:
         pytest.skip(f"Ollama not available or config missing: {e}")
 
-def test_inference_failure_case(dummy_image_frame):
-    """Test failure case: nonsense trigger (should still return yes/no, not error)."""
+@pytest.mark.asyncio
+async def test_inference_failure_case(dummy_image_frame):
     try:
-        result = run_unified_inference(dummy_image_frame, "nonsense_trigger_1234567890", model_type="small")
+        model, engine = validate_small_model_config()
+    except Exception as e:
+        pytest.skip(f"Config or environment not available: {e}")
+    try:
+        result = await run_unified_inference(dummy_image_frame, "nonsense_trigger_1234567890", model_type="small")
         assert result.result in ("yes", "no")
     except Exception as e:
+        print(f"[DEBUG] Exception in test_inference_failure_case: {e}")
         pytest.skip(f"Engine not available or config missing: {e}")

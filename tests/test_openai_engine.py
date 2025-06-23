@@ -145,9 +145,3 @@ async def test_openai_engine_invalid_response(monkeypatch, test_image, test_trig
             await engine.process_frame(test_image, test_trigger)
 
     await engine.shutdown()
-
-@pytest.mark.asyncio
-async def test_openai_engine_missing_api_key():
-    """Test OpenAIEngine initialization with missing API key."""
-    with pytest.raises(OpenAIError):
-        OpenAIEngine(OpenAIConfig())

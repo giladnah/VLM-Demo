@@ -2,9 +2,56 @@
 platform linux -- Python 3.10.12, pytest-8.3.5, pluggy-1.6.0 -- /home/giladn/tappas_apps/repos/VLM-Demo/venv/bin/python3
 cachedir: .pytest_cache
 rootdir: /home/giladn/tappas_apps/repos/VLM-Demo
-plugins: typeguard-4.4.2, anyio-4.9.0
-collecting ... collected 1 item
+plugins: typeguard-4.4.2, anyio-4.9.0, asyncio-1.0.0
+asyncio: mode=strict, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 41 items
 
-tests/test_gradio_runner.py::test_gradio_app_instantiation_and_ui PASSED [100%]
+tests/test_app.py::test_root PASSED                                      [  2%]
+tests/test_app.py::test_health PASSED                                    [  4%]
+tests/test_app.py::test_start_and_trigger PASSED                         [  7%]
+tests/test_app.py::test_trigger_no_active_orchestration PASSED           [  9%]
+tests/test_app.py::test_infer_small_success PASSED                       [ 12%]
+tests/test_app.py::test_infer_small_failure PASSED                       [ 14%]
+tests/test_app.py::test_infer_large_success PASSED                       [ 17%]
+tests/test_app.py::test_infer_large_failure PASSED                       [ 19%]
+tests/test_app.py::test_debug_endpoints PASSED                           [ 21%]
+tests/test_buffer.py::test_init_frame_buffer_valid PASSED                [ 24%]
+tests/test_buffer.py::test_init_frame_buffer_invalid PASSED              [ 26%]
+tests/test_buffer.py::test_update_buffer_and_overflow PASSED             [ 29%]
+tests/test_buffer.py::test_update_buffer_type_safety PASSED              [ 31%]
+tests/test_config.py::test_config_loads PASSED                           [ 34%]
+tests/test_config.py::test_get_config_returns_same_object PASSED         [ 36%]
+tests/test_config.py::test_missing_file_raises PASSED                    [ 39%]
+tests/test_config.py::test_invalid_yaml PASSED                           [ 41%]
+tests/test_gradio_runner.py::test_gradio_app_instantiation_and_ui PASSED [ 43%]
+tests/test_inference.py::test_ollama_engine_initialization PASSED        [ 46%]
+tests/test_inference.py::test_ollama_engine_process_frame PASSED         [ 48%]
+tests/test_inference.py::test_unified_inference_lifecycle PASSED         [ 51%]
+tests/test_inference.py::test_unified_inference_process_frame PASSED     [ 53%]
+tests/test_inference.py::test_ollama_engine_error_handling PASSED        [ 56%]
+tests/test_inference_large.py::test_successful_large_inference SKIPPED   [ 58%]
+tests/test_inference_large.py::test_large_inference_edge_case PASSED     [ 60%]
+tests/test_inference_large.py::test_large_inference_failure_case SKIPPED [ 63%]
+tests/test_inference_small.py::test_successful_inference SKIPPED (Co...) [ 65%]
+tests/test_inference_small.py::test_inference_edge_case PASSED           [ 68%]
+tests/test_inference_small.py::test_inference_failure_case SKIPPED (...) [ 70%]
+tests/test_openai_engine.py::test_openai_engine_initialization PASSED    [ 73%]
+tests/test_openai_engine.py::test_openai_engine_process_frame PASSED     [ 75%]
+tests/test_openai_engine.py::test_openai_engine_error_handling PASSED    [ 78%]
+tests/test_openai_engine.py::test_openai_engine_invalid_response PASSED  [ 80%]
+tests/test_orchestrator.py::TestOrchestrateProcessing::test_video_source_unavailable PASSED [ 82%]
+tests/test_trigger.py::test_evaluate_trigger_with_valid_inference_result[yes-True] PASSED [ 85%]
+tests/test_trigger.py::test_evaluate_trigger_with_valid_inference_result[no-False] PASSED [ 87%]
+tests/test_trigger.py::test_evaluate_trigger_with_valid_inference_result[None-False] PASSED [ 90%]
+tests/test_trigger.py::test_evaluate_trigger_with_none_inference_result PASSED [ 92%]
+tests/test_video_source.py::test_videostream_file_source PASSED          [ 95%]
+tests/test_video_source.py::test_videostream_rtsp_source PASSED          [ 97%]
+tests/test_video_source.py::test_videostream_not_opened PASSED           [100%]
 
-========================= 1 passed, 1 warning in 2.04s =========================
+=============================== warnings summary ===============================
+venv/lib/python3.10/site-packages/websockets/legacy/__init__.py:6
+  /home/giladn/tappas_apps/repos/VLM-Demo/venv/lib/python3.10/site-packages/websockets/legacy/__init__.py:6: DeprecationWarning: websockets.legacy is deprecated; see https://websockets.readthedocs.io/en/stable/howto/upgrade.html for upgrade instructions
+    warnings.warn(  # deprecated in 14.0 - 2024-11-09
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=================== 37 passed, 4 skipped, 1 warning in 7.41s ===================
