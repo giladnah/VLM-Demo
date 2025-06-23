@@ -15,9 +15,9 @@ Use this checklist to track progress on building the VLM Camera Application.
 
   * `python3 -m venv venv`
   * `source venv/bin/activate`
-  * `pip install fastapi uvicorn pydantic opencv-python`
+  * `pip install fastapi uvicorn pydantic opencv-python python-dotenv`
   * **Virtual environment created and dependencies installed (2024-06-13)**
-* [ ] **Verify Grad.io UI environment and dependencies**
+* [x] **Verify Grad.io UI environment and dependencies**
 
   * Confirm Node.js and Grad.io CLI installed
   * `npm install gradio react react-dom`
@@ -32,18 +32,24 @@ Use this checklist to track progress on building the VLM Camera Application.
 
   * Define `init_frame_buffer(size=10)`: initialize deque of fixed length.
   * Define `update_buffer(buffer, frame)`: append new frame, pop oldest.
-* [x] **Create `inference_small.py`** (2024-07-15)
-
-  * Define `run_small_inference(frame, trigger_description)`: call `ollama run qwen2-vl2b`, parse JSON output.
 * [x] **Create `trigger.py`** (2024-07-15)
 
   * Define `evaluate_trigger(detection, trigger_description)`: compare detection labels to trigger keywords.
-* [x] **Create `inference_large.py`** (2024-07-15)
-
-  * Define `run_large_inference(frames)`: call `ollama run 7b-vlm` with batch of frames or single image.
 * [x] **Create `orchestrator.py`** (2024-07-15)
 
   * Define `orchestrate_processing(source_uri, trigger_description)`: coordinate frame extraction, buffering, inference, and triggers.
+
+## Unified Inference System
+
+* [x] **Implement Unified Inference System** (2024-08-01)
+  * [x] Define `InferenceEngine` protocol and base models
+  * [x] Implement `UnifiedVLMInference` class
+  * [x] Implement Ollama engine (small/large)
+  * [x] Implement OpenAI engine (large/small)
+  * [x] Remove/deprecate old `inference_small.py` and `inference_large.py`
+  * [x] Update all orchestrator and API logic to use unified system
+  * [x] Update all tests to use unified system
+  * [x] Add secure config and .env support for OpenAI API keys
 
 ## API Development
 
@@ -60,7 +66,7 @@ Use this checklist to track progress on building the VLM Camera Application.
   * Allow updating trigger description at runtime.
 * [x] **Implement `/infer/small` endpoint** (2024-07-15)
 
-  * Accept image payload, call `run_small_inference`, return result.
+  * Accept image payload, call unified inference, return result.
 * [x] **Implement `/infer/large` endpoint** (2024-07-15)
 * [x] **Implement `/health` endpoint** (2024-07-15)
 
@@ -77,13 +83,7 @@ Use this checklist to track progress on building the VLM Camera Application.
   * [x] Build or improve smoke/integration tests
 * [x] **orchestrator.py**
   * [x] Review code and improve documentation
-  * [ ] Build or improve unit/integration tests
-* [x] **inference_small.py**
-  * [x] Review code and improve documentation
-  * [x] Build or improve unit tests
-* [x] **inference_large.py**
-  * [x] Review code and improve documentation
-  * [x] Build or improve unit tests
+  * [x] Build or improve unit/integration tests
 * [x] **trigger.py**
   * [x] Review code and improve documentation
   * [x] Build or improve unit tests
@@ -93,3 +93,28 @@ Use this checklist to track progress on building the VLM Camera Application.
 * [x] **video_source.py**
   * [x] Review code and improve documentation
   * [x] Build or improve unit tests
+* [x] **Unified Inference System**
+  * [x] Review code and improve documentation
+  * [x] Build or improve unit/integration tests
+  * [x] Remove all references to deprecated inference modules
+
+## Documentation
+
+* [x] **Update README.md** for unified system, OpenAI/Ollama config, and .env usage
+* [x] **Update docs/inference/README.md** for unified system and engine-agnostic usage
+* [x] **Update docs/inference/configuration.md** for OpenAI config and .env
+* [x] **Update PLANNING.md** to reflect unified system and current architecture
+* [x] **Update or remove docs/inference/engine.md** (empty or redundant)
+* [x] **Update or remove references to Hailo unless specifically planned**
+
+## Future Tasks
+* [ ] **Hailo Integration** (if/when planned)
+  * [ ] Research Hailo API requirements
+  * [ ] Design Hailo engine implementation
+  * [ ] Plan hardware acceleration strategy
+  * [ ] Document hardware requirements
+* [ ] **Advanced Features**
+  * [ ] Add support for custom model loading
+  * [ ] Implement model switching at runtime
+  * [ ] Add advanced trigger combinations
+  * [ ] Create plugin system for custom engines

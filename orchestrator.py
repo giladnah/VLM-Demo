@@ -12,12 +12,12 @@ import subprocess
 import cv2
 import queue
 import multiprocessing
+import asyncio
 
 from video_source import get_video_stream, extract_i_frame, VideoStream, ImageFrame
 from buffer import init_frame_buffer, update_buffer, FrameBuffer
-from inference_small import run_small_inference
+from inference.unified import run_unified_inference
 from trigger import evaluate_trigger
-from inference_large import run_large_inference, LargeInferenceOutput
 
 BUFFER_SIZE = 10
 FRAME_GRAB_INTERVAL = 1/30
@@ -60,51 +60,63 @@ class OrchestrationConfig:
 def inference_worker_process(input_queue, output_queue, stop_event, config):
     """
     Worker process for running small and large inference in a separate process.
+    Uses the unified inference system (run_unified_inference).
+    Old run_small_inference/run_large_inference are deprecated.
     """
-    import time
-    from inference_small import run_small_inference
-    from inference_large import run_large_inference, LargeInferenceOutput
     while not stop_event.is_set():
         try:
             frame, trigger_description, timestamp = input_queue.get(timeout=1)
         except Exception:
             continue
         # Run small inference
-        print(f"[Orchestrator] [InferenceProcess] Running small inference for trigger: '{trigger_description}' using model: {config['small_model_name']} at {config['small_ollama_server']}")
-        small_inference_out: Optional[str] = run_small_inference(
-            frame,
-            trigger_description,
-            model_name=config["small_model_name"],
-            ollama_url=config["small_ollama_server"]
-        )
+        print(f"[Orchestrator] [InferenceProcess] Running small inference for trigger: '{trigger_description}' (unified engine)")
+        try:
+            small_result = asyncio.run(run_unified_inference(
+                frame,
+                trigger_description,
+                model_type="small"
+            ))
+            small_inference_out = small_result.result
+        except Exception as e:
+            print(f"[Orchestrator] [InferenceProcess] Small inference failed: {e}")
+            small_inference_out = None
         # Immediately send small inference result
         result_payload = {
             "result": small_inference_out,
             "timestamp": time.time(),
             "frame": frame,
-            "trigger": trigger_description
+            "trigger": trigger_description,
+            "raw_result": getattr(small_result, 'raw_model_output', None) if small_inference_out else None
         }
         output_queue.put(result_payload)
         # If trigger is met, run large inference and send a second result
         if small_inference_out == "yes":
-            print(f"[Orchestrator] [InferenceProcess] Trigger MET. Running large inference using model: {config['large_model_name']} at {config['large_ollama_server']}")
-            large_inference_out: Optional[LargeInferenceOutput] = run_large_inference(
-                frame,
-                trigger_description,
-                model_name=config["large_model_name"],
-                ollama_url=config["large_ollama_server"]
-            )
-            if large_inference_out:
-                print(f"[Orchestrator] [InferenceProcess] Large inference result - Result: '{large_inference_out.result}', Analysis: '{large_inference_out.detailed_analysis[:100]}...'")
+            print(f"[Orchestrator] [InferenceProcess] Trigger MET. Running large inference (unified engine)")
+            try:
+                large_result = asyncio.run(run_unified_inference(
+                    frame,
+                    trigger_description,
+                    model_type="large"
+                ))
+                print(f"[Orchestrator] [InferenceProcess] Large inference result - Result: '{large_result.result}', Analysis: '{large_result.detailed_analysis[:100]}...'")
                 # Send a second payload with large inference result
                 result_payload_large = {
                     "result": small_inference_out,  # Always include small result for context
                     "timestamp": time.time(),
                     "frame": frame,
                     "trigger": trigger_description,
-                    "large_inference": large_inference_out.dict()
+                    "large_inference": {
+                        "result": large_result.result,
+                        "detailed_analysis": large_result.detailed_analysis,
+                        "confidence_score": large_result.confidence_score,
+                        "raw_model_output": large_result.raw_model_output,
+                        "processing_time_ms": large_result.processing_time_ms,
+                        "engine_name": large_result.engine_name
+                    }
                 }
                 output_queue.put(result_payload_large)
+            except Exception as e:
+                print(f"[Orchestrator] [InferenceProcess] Large inference failed: {e}")
     print("[Orchestrator] [InferenceProcess] Exiting.")
 
 class Orchestrator:

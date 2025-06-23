@@ -86,3 +86,7 @@ latest_small_inference.jpg
 hefs_and_embeddings/qwen2_combined_shared_weights.hef.v3.optimized
 hefs_and_embeddings/qwen2_vl_vision_224x224_w_pre.hef
 hefs_and_embeddings/token_embed_after_rot_uint16.npy
+
+# Environment
+.env  # Ignore real secrets
+!.env.example  # Allow template/example to be tracked

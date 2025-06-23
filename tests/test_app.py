@@ -3,8 +3,9 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import pytest
+import pytest_asyncio
 from fastapi.testclient import TestClient
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 import app
 from io import BytesIO
 from PIL import Image
@@ -57,9 +58,15 @@ def test_trigger_no_active_orchestration(mock_orch):
     resp = client.put("/trigger", json={"trigger": "new trigger"})
     assert resp.status_code == 404
 
+@pytest.fixture(autouse=True)
+def patch_app_unified_inference(monkeypatch):
+    mock = AsyncMock()
+    monkeypatch.setattr("app.run_unified_inference", mock)
+    return mock
+
 # --- Inference Endpoints ---
-@patch("app.run_small_inference_direct", return_value="yes")
-def test_infer_small_success(mock_inf):
+def test_infer_small_success(patch_app_unified_inference):
+    patch_app_unified_inference.return_value = MagicMock(result="yes")
     img_bytes = make_jpeg_bytes()
     files = {"image": ("test.jpg", img_bytes, "image/jpeg")}
     data = {"trigger": "a test trigger"}
@@ -67,24 +74,24 @@ def test_infer_small_success(mock_inf):
     assert resp.status_code == 200
     assert resp.json() == "yes"
 
-@patch("app.run_small_inference_direct", return_value=None)
-def test_infer_small_failure(mock_inf):
+def test_infer_small_failure(patch_app_unified_inference):
+    patch_app_unified_inference.return_value = None
     img_bytes = make_jpeg_bytes()
     files = {"image": ("test.jpg", img_bytes, "image/jpeg")}
     data = {"trigger": "a test trigger"}
     resp = client.post("/infer/small", data=data, files=files)
     assert resp.status_code == 500
 
-@patch("app.run_large_inference_direct", return_value=MagicMock(result="yes", detailed_analysis="details"))
-def test_infer_large_success(mock_inf):
+def test_infer_large_success(patch_app_unified_inference):
+    patch_app_unified_inference.return_value = MagicMock(result="yes", detailed_analysis="details", dict=lambda: {"result": "yes", "detailed_analysis": "details"})
     img_bytes = make_jpeg_bytes()
     files = {"image": ("test.jpg", img_bytes, "image/jpeg")}
     resp = client.post("/infer/large", files=files)
     assert resp.status_code == 200
     assert resp.json()["result"] == "yes"
 
-@patch("app.run_large_inference_direct", return_value=None)
-def test_infer_large_failure(mock_inf):
+def test_infer_large_failure(patch_app_unified_inference):
+    patch_app_unified_inference.return_value = None
     img_bytes = make_jpeg_bytes()
     files = {"image": ("test.jpg", img_bytes, "image/jpeg")}
     resp = client.post("/infer/large", files=files)

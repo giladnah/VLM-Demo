@@ -165,3 +165,59 @@ def orchestrate_processing(source_uri: str, trigger: str): ...
 - No UI editing of RTSP cameras; selection is from config only.
 - Pushing to remote is now only done with explicit user request.
 
+## 9. Unified Inference System Architecture
+
+### Overview
+The unified inference system provides a flexible, extensible architecture supporting multiple VLM inference engines and trigger types.
+
+### Inference Engines
+1. **Ollama Engine**
+   - Local inference using Ollama CLI
+   - Supports both small (2B) and large (7B) models
+   - Configurable retry and timeout settings
+
+2. **OpenAI Engine**
+   - Cloud-based inference using OpenAI's GPT-4V
+   - Requires API key configuration
+   - Supports advanced vision analysis capabilities
+
+3. **Hailo Engine** (Future Implementation)
+   - Hardware-accelerated inference
+   - Optimized for edge deployment
+   - Implementation details TBD
+
+### Class Structure
+```python
+class InferenceEngine(Protocol):
+    """Protocol defining the interface for inference engines."""
+    async def initialize(self) -> None: ...
+    async def process_frame(self, frame: ImageFrame, trigger: TriggerConfig) -> InferenceResult: ...
+    async def shutdown(self) -> None: ...
+
+class TriggerConfig(BaseModel):
+    """Configuration for different types of triggers."""
+    type: TriggerType  # Enum: OBJECT_DETECTION, SCENE_ANALYSIS, CUSTOM_PROMPT
+    description: str
+    confidence_threshold: float = 0.7
+    additional_params: Dict[str, Any] = {}
+
+class UnifiedVLMInference:
+    """Main class coordinating different inference engines."""
+    def __init__(self, engine_type: str, config: InferenceConfig):
+        self.engine = self._create_engine(engine_type, config)
+        self.trigger_manager = TriggerManager()
+```
+
+### Data Flow
+1. UnifiedVLMInference receives frames and trigger configurations
+2. Appropriate engine is selected based on configuration
+3. Frame processing is delegated to specific engine implementation
+4. Results are standardized through common output format
+5. Trigger evaluation is performed by TriggerManager
+
+### Configuration Management
+- YAML-based configuration for engine selection and parameters
+- Environment variables for sensitive data (API keys)
+- Runtime configuration updates supported
+- Per-engine specific configuration sections
+
