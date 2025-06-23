@@ -89,4 +89,4 @@ hefs_and_embeddings/token_embed_after_rot_uint16.npy
 
 # Environment
 .env  # Ignore real secrets
-!.env.example  # Allow template/example to be tracked
+# !.env.example  # Allow template/example to be tracked
