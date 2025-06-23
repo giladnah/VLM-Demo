@@ -125,9 +125,9 @@ class VLMGradioApp:
                 "source": video_path,
                 "trigger": trigger,
                 "small_model_name": CONFIG['small_model']['name'],
-                "small_ollama_server": CONFIG['small_model']['ollama_server'],
+                "small_ollama_server": CONFIG['small_model'].get('ollama_server'),
                 "large_model_name": CONFIG['large_model']['name'],
-                "large_ollama_server": CONFIG['large_model']['ollama_server'],
+                "large_ollama_server": CONFIG['large_model'].get('ollama_server'),
             }
             resp = requests.post(f"{API_URL}/start", json=payload)
             if resp.ok:
@@ -199,7 +199,7 @@ class VLMGradioApp:
                 files = {"image": (os.path.basename(image_path), f, "image/jpeg")}
                 data = {
                     "model_name": CONFIG['large_model']['name'],
-                    "ollama_server": CONFIG['large_model']['ollama_server']
+                    "ollama_server": CONFIG['large_model'].get('ollama_server')
                 }
                 resp = requests.post(f"{API_URL}/infer/large", files=files, data=data)
                 if resp.ok:

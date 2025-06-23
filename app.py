@@ -11,6 +11,11 @@ import subprocess # For health check
 import json # For parsing ollama list output
 from fastapi.responses import FileResponse, StreamingResponse
 
+# --- Load environment variables from .env automatically ---
+from dotenv import load_dotenv
+load_dotenv()
+# ---------------------------------------------------------
+
 from orchestrator import orchestrator, OrchestrationConfig
 from config import get_config
 from inference.unified import run_unified_inference
@@ -53,9 +58,10 @@ orchestration_lock = threading.Lock() # Protects access to the global state abov
 
 CONFIG = get_config()
 SMALL_MODEL_NAME = CONFIG['small_model']['name']
-SMALL_MODEL_OLLAMA_SERVER = CONFIG['small_model']['ollama_server']
+# Use .get to avoid KeyError if ollama_server is not present (e.g., when using OpenAI)
+SMALL_MODEL_OLLAMA_SERVER = CONFIG['small_model'].get('ollama_server')
 LARGE_MODEL_NAME = CONFIG['large_model']['name']
-LARGE_MODEL_OLLAMA_SERVER = CONFIG['large_model']['ollama_server']
+LARGE_MODEL_OLLAMA_SERVER = CONFIG['large_model'].get('ollama_server')
 DEFAULT_TRIGGERS = CONFIG.get('default_triggers', ["a person falling down"])
 
 class StartRequest(BaseModel):
@@ -300,7 +306,7 @@ async def direct_small_inference(
             raise HTTPException(status_code=400, detail="Received an empty image file.")
 
         # Decode image using OpenCV
-        image_np_array = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
+        image_np_array = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)  # type: ignore[attr-defined]
 
         if image_np_array is None:
             raise HTTPException(status_code=400, detail="Could not decode image. Ensure it is a valid JPEG or PNG.")
@@ -329,6 +335,7 @@ async def direct_small_inference(
     # If it were to use BackgroundTasks, the client would get an immediate 200 OK before result is ready.
     model_name = model_name or SMALL_MODEL_NAME
     ollama_server = ollama_server or SMALL_MODEL_OLLAMA_SERVER
+    # ollama_server may be None if using OpenAI; handle accordingly in run_unified_inference
     inference_result = await run_unified_inference(image_np_array, trigger, model_type="small")
 
     if inference_result is None:
@@ -355,7 +362,7 @@ async def direct_large_inference(image: UploadFile = File(...), model_name: Opti
         if not image_bytes:
             raise HTTPException(status_code=400, detail="Received an empty image file.")
 
-        image_np_array = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
+        image_np_array = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)  # type: ignore[attr-defined]
 
         if image_np_array is None:
             raise HTTPException(status_code=400, detail="Could not decode image. Ensure it is a valid JPEG or PNG.")
@@ -372,6 +379,7 @@ async def direct_large_inference(image: UploadFile = File(...), model_name: Opti
     # Consider fastapi.concurrency.run_in_threadpool if it becomes a performance issue.
     model_name = model_name or LARGE_MODEL_NAME
     ollama_server = ollama_server or LARGE_MODEL_OLLAMA_SERVER
+    # ollama_server may be None if using OpenAI; handle accordingly in run_unified_inference
     inference_result = await run_unified_inference(image_np_array, "", model_type="large")
 
     if inference_result is None:
@@ -392,7 +400,7 @@ def get_latest_small_inference_frame():
     import numpy as np
     # Convert BGR to RGB if needed for display (Gradio can handle BGR, but browsers expect RGB)
     # frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    success, img_encoded = cv2.imencode('.jpg', frame)
+    success, img_encoded = cv2.imencode('.jpg', frame)  # type: ignore[attr-defined]
     if not success:
         raise HTTPException(status_code=500, detail="Failed to encode image.")
     return StreamingResponse(io.BytesIO(img_encoded.tobytes()), media_type="image/jpeg")
