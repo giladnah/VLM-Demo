@@ -85,4 +85,4 @@ tests/__pycache__/
 *.log
 
 # Environment
-.env  # Ignore real secrets
+.env  # Ignore real secrets.env
