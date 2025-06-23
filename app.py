@@ -12,9 +12,8 @@ import json # For parsing ollama list output
 from fastapi.responses import FileResponse, StreamingResponse
 
 from orchestrator import orchestrator, OrchestrationConfig
-from inference_small import run_small_inference as run_small_inference_direct, MODEL_NAME_DEFAULT as SMALL_MODEL_NAME
-from inference_large import run_large_inference as run_large_inference_direct, LargeInferenceOutput, MODEL_NAME_DEFAULT_LARGE as LARGE_MODEL_NAME
 from config import get_config
+from inference.unified import run_unified_inference
 
 # TODO: Potentially import Pydantic models for request/response if defined centrally
 # TODO: Import orchestrator and other necessary components when endpoints are added
@@ -330,17 +329,17 @@ async def direct_small_inference(
     # If it were to use BackgroundTasks, the client would get an immediate 200 OK before result is ready.
     model_name = model_name or SMALL_MODEL_NAME
     ollama_server = ollama_server or SMALL_MODEL_OLLAMA_SERVER
-    inference_result = run_small_inference_direct(image_np_array, trigger, model_name, ollama_url=ollama_server)
+    inference_result = await run_unified_inference(image_np_array, trigger, model_type="small")
 
     if inference_result is None:
         print(f"[API /infer/small] WARN: Small inference direct call returned no result for trigger '{trigger}'.")
         raise HTTPException(status_code=500, detail="Small VLM inference failed or returned no result. Check server logs.")
 
-    print(f"[API /infer/small] INFO: Small inference direct call successful. Result: {inference_result}")
-    return inference_result
+    print(f"[API /infer/small] INFO: Small inference direct call successful. Result: {inference_result.result}")
+    return inference_result.result
 
 @app.post("/infer/large", tags=["Direct Inference"], summary="Performs inference using the large VLM on a single image.")
-async def direct_large_inference(image: UploadFile = File(...), model_name: Optional[str] = Form(None), ollama_server: Optional[str] = Form(None)) -> Optional[LargeInferenceOutput]:
+async def direct_large_inference(image: UploadFile = File(...), model_name: Optional[str] = Form(None), ollama_server: Optional[str] = Form(None)) -> Optional[dict]:
     """Accepts an image, then runs the large VLM for direct, detailed inference.
 
     - **image**: The image file (JPEG/PNG) to process.
@@ -373,14 +372,14 @@ async def direct_large_inference(image: UploadFile = File(...), model_name: Opti
     # Consider fastapi.concurrency.run_in_threadpool if it becomes a performance issue.
     model_name = model_name or LARGE_MODEL_NAME
     ollama_server = ollama_server or LARGE_MODEL_OLLAMA_SERVER
-    inference_result = run_large_inference_direct(image_np_array, model_name, ollama_server)
+    inference_result = await run_unified_inference(image_np_array, "", model_type="large")
 
     if inference_result is None:
         print(f"[API /infer/large] WARN: Large inference direct call returned no result.")
         raise HTTPException(status_code=500, detail="Large VLM inference failed or returned no result. Check server logs.")
 
     print(f"[API /infer/large] INFO: Large inference direct call successful. Result: '{inference_result.result}', Analysis: '{inference_result.detailed_analysis[:80]}...'")
-    return inference_result
+    return inference_result.dict()
 
 @app.get("/latest-small-inference-frame", tags=["Debug"], summary="Get the latest frame used for small inference.")
 def get_latest_small_inference_frame():
@@ -417,8 +416,11 @@ def get_rtsp_cameras():
 
 if __name__ == "__main__":
     import uvicorn
-    print("Starting VLM Camera Service API with Uvicorn...")
-    # Configuration for Uvicorn when running app.py directly
-    # Host 0.0.0.0 makes it accessible on the network
-    # Reload True is useful for development to auto-reload on code changes
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
+    # Suppress FastAPI/Uvicorn access logs for cleaner output
+    uvicorn.run(
+        "app:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        access_log=False  # <--- disables '[FastAPI] INFO: ...' request logs
+    )
