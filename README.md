@@ -1,9 +1,10 @@
 # VLM Camera Service
 
-A Vision-Language Model (VLM) Camera Service for real-time video analysis using small and large VLMs (e.g., Qwen2.5vl) via the Ollama inference engine. It provides:
+A Vision-Language Model (VLM) Camera Service for real-time video analysis using small and large VLMs (e.g., Qwen2.5vl, OpenAI GPT-4o) via a unified inference engine. It provides:
 - A FastAPI backend for orchestration, inference, and API endpoints.
 - A Gradio-based web UI for user interaction.
 - Modular Python code for video streaming, buffering, inference, and trigger logic.
+- Secure, engine-agnostic configuration supporting both local (Ollama) and cloud (OpenAI) inference.
 
 ---
 
@@ -17,9 +18,12 @@ A Vision-Language Model (VLM) Camera Service for real-time video analysis using 
 - Manages the video processing pipeline: video stream acquisition, frame grabbing, buffering, inference, and trigger logic.
 - Uses multiprocessing for inference.
 
-**3. Inference Modules**
-- `inference_small.py` / `inference_large.py`: Run inference using small/large VLMs via Ollama REST API or CLI.
-- `inference_small_hailo.py`: (Optional) Hailo device integration for hardware-accelerated inference.
+**3. Unified Inference System**
+- `inference/unified.py`: Unified async entry point for all inference (small/large, any engine).
+- `inference/engine.py`: Protocols, configs, and result models.
+- `inference/ollama_engine.py`: Ollama engine implementation.
+- `inference/openai_engine.py`: OpenAI engine implementation.
+- Engine selection and configuration is handled via `config.yaml`.
 
 **4. Video and Buffering**
 - `video_source.py`: Handles video stream input and I-frame extraction.
@@ -33,7 +37,8 @@ A Vision-Language Model (VLM) Camera Service for real-time video analysis using 
 - Communicates with the FastAPI backend via HTTP.
 
 **7. Configuration**
-- `config.yaml`: Central config for model names, server addresses, and default triggers.
+- `config.yaml`: Central config for model names, engine selection, server addresses, and default triggers.
+- `.env`: Used for secure secret handling (e.g., OpenAI API keys).
 
 **8. Testing**
 - `tests/`: Pytest-based unit tests for core modules.
@@ -60,9 +65,9 @@ A Vision-Language Model (VLM) Camera Service for real-time video analysis using 
 
 ## Setup and Installation
 
-1. **Install Ollama CLI**
+1. **Install Ollama CLI (if using Ollama)**
    - See [ollama.com](https://ollama.com/) for your OS.
-2. **Download VLM Models**
+2. **Download VLM Models (Ollama only)**
    - Small: `ollama pull qwen2.5vl:3b`
    - Large: `ollama pull qwen2.5vl:7b`
 3. **Set up Python Virtual Environment**
@@ -70,12 +75,22 @@ A Vision-Language Model (VLM) Camera Service for real-time video analysis using 
    - `source venv/bin/activate`
 4. **Install Python Dependencies**
    - `pip install -r requirements.txt`
+5. **Set up OpenAI API Key (if using OpenAI engine)**
+   - Create a `.env` file in the project root:
+     ```
+     OPENAI_API_KEY=sk-...your-key-here...
+     ```
+   - Or export it in your shell:
+     ```bash
+     export OPENAI_API_KEY=sk-...your-key-here...
+     ```
+   - **Never commit your API key to git!**
 
 ---
 
 ## Running the Application
 
-1. **Ensure Ollama Service is Running**
+1. **Ensure Ollama Service is Running (if using Ollama)**
 2. **Activate Virtual Environment**
 3. **Start the FastAPI Server**
    - `python app.py` or `uvicorn app:app --host 0.0.0.0 --port 8000 --reload`
@@ -83,6 +98,28 @@ A Vision-Language Model (VLM) Camera Service for real-time video analysis using 
 4. **Start the Gradio UI**
    - `python gradio_runner.py`
    - UI at `http://localhost:7860`
+
+---
+
+## Unified Runner Script: `vlm_app_runner.py`
+
+The recommended way to launch both the FastAPI backend and Gradio UI together for local development or demos is to use the unified runner script:
+
+```sh
+python vlm_app_runner.py
+```
+
+**Features:**
+- Starts both FastAPI (`app.py`) and Gradio UI (`gradio_runner.py`) as subprocesses
+- Streams logs from both processes with clear prefixes
+- Prints process PIDs and exit codes for robust debugging
+- If either process exits, both are terminated for safety
+- Uses unbuffered output for real-time log streaming
+
+**Recommended for:**
+- Local development
+- Demos and testing
+- Ensuring both services are running and monitored together
 
 ---
 
@@ -160,6 +197,7 @@ See `http://localhost:8000/docs` when running for full OpenAPI documentation.
 
 - **Large files:** Model weights and test videos are not tracked in Git. See `.gitignore`.
 - **Ollama errors:** Ensure the Ollama service is running and models are pulled.
+- **OpenAI errors:** Ensure your `OPENAI_API_KEY` is set in your environment or `.env` file. If you see errors about missing API keys, check your `.env` and restart the app.
 - **Webcam/RTSP issues:** Check device permissions and network connectivity.
 - **Tests failing:** Ensure all dependencies are installed and the virtual environment is active.
 
