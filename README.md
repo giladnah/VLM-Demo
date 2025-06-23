@@ -42,12 +42,19 @@ A Vision-Language Model (VLM) Camera Service for real-time video analysis using 
 
 ## Application Flow
 
-1. Start the backend (`app.py`) and Gradio UI (`gradio_runner.py`).
-2. Select a video source and trigger in the UI.
-3. UI sends a `/start` request to the backend, which initializes the orchestrator.
-4. Orchestrator grabs frames, runs small model inference, and if the trigger is met, runs large model inference.
-5. Results and logs are updated and polled by the UI.
-6. User can update triggers, upload images for direct inference, or monitor system health.
+1. **Startup**: User starts the FastAPI backend (`app.py`) and Gradio UI (`gradio_runner.py`).
+2. **User Interaction**: User selects a video source and trigger in the UI.
+3. **Orchestration Start**: UI sends a `/start` request to the backend, which initializes the orchestrator.
+4. **Frame Processing**:
+    - The orchestrator grabs frames from the video source.
+    - For each frame:
+        - **Small Model Inference**: The orchestrator uses the engine and model specified in `config.yaml` (via the `engine` field: `ollama` or `openai`) for small model inference, using the unified inference system.
+        - If the trigger is met, **Large Model Inference** is run, again using the engine/model specified in `config.yaml`.
+        - The unified inference system (`UnifiedVLMInference`) abstracts engine selection and configuration, supporting both Ollama and OpenAI (and future engines).
+    - Results are standardized and returned to the orchestrator.
+5. **Results**: Results and logs are updated and polled by the UI.
+6. **User Actions**: User can update triggers, upload images for direct inference, or monitor system health.
+7. **Secure Configuration**: All secrets (e.g., OpenAI API keys) are handled via environment variables or `.env` files, never committed to git.
 
 ---
 
@@ -79,24 +86,52 @@ A Vision-Language Model (VLM) Camera Service for real-time video analysis using 
 
 ---
 
-## Configuration: `config.yaml`
+## Configuration: `config.yaml` (All Supported Options)
 
-Controls model selection, server addresses, and default triggers. Example:
+This file controls model selection, inference engine, server addresses, and default triggers.
 
+**Example:**
 ```yaml
 small_model:
-  name: qwen2.5vl:3b
-  ollama_server: http://localhost:11434
-large_model:
-  name: qwen2.5vl:7b
-  ollama_server: http://10.41.74.178:11434
-server_ips:
-  backend: "http://localhost:8000"
-  gradio: "http://localhost:7860"
-default_triggers:
-  - "a person falling down"
+  name: qwen2.5vl:3b                # Model name for small model (Ollama or OpenAI)
+  ollama_server: http://localhost:11434  # Ollama server address (if using Ollama)
+  # engine: ollama                  # (default) options: ollama, openai
 
+large_model:
+  name: gpt-4o                      # Model name for large model (Ollama or OpenAI)
+  engine: openai                    # options: openai, ollama
+  # ollama_server: http://localhost:11434  # Only needed if using Ollama
+  # If engine: openai, the OpenAI API key must be set in the environment or .env file
+
+server_ips:
+  backend: "http://localhost:8000"  # FastAPI backend address
+  gradio: "http://localhost:7860"   # Gradio UI address
+
+default_triggers:
+  - "a person lying on the floor"
+
+rtsp_cameras:
+  - name: "Office Camera"
+    address: "rtsp://192.168.241.62/axis-media/media.amp"
+    username: "root"
+    password: "hailo"
 ```
+
+### Option Descriptions
+- **name**: The model name to use. For OpenAI, use `gpt-4o` (recommended for vision). For Ollama, use e.g. `qwen2.5vl:3b` or `qwen2.5vl:7b`.
+- **engine**: Which inference engine to use. `ollama` (default) or `openai` (for OpenAI API).
+- **ollama_server**: The Ollama server address. Only needed if using Ollama.
+- **server_ips**: Backend and UI addresses.
+- **default_triggers**: List of default trigger descriptions.
+- **rtsp_cameras**: List of RTSP camera sources (with credentials if needed).
+
+#### **OpenAI Engine Usage**
+- Set `engine: openai` and `name: gpt-4o` (or another OpenAI model).
+- The OpenAI API key must be set in the environment (`OPENAI_API_KEY`) or in a `.env` file.
+- No `ollama_server` is needed for OpenAI.
+
+#### **Ollama Engine Usage**
+- Set `engine: ollama` (or omit for default) and provide `ollama_server` and `name`.
 
 ---
 
@@ -182,6 +217,30 @@ You should receive a JSON response from the model.
   curl -X POST http://localhost:11434/api/generate ...
   ```
 - If you want to restrict access, consider using a VPN or firewall rules to limit which IPs can connect.
+
+## Secure OpenAI API Key Handling
+
+- **Never commit your OpenAI API key to git or hard-code it in code.**
+- The OpenAI engine will use the `OPENAI_API_KEY` environment variable if not set in code.
+- For local development, use a `.env` file (with `python-dotenv`) to load environment variables automatically.
+- A template `.env.example` is provided. Copy it to `.env` and add your real key.
+- `.env` is in `.gitignore` and will never be committed.
+
+**.env.example**
+```
+# Example .env file for local development
+# Copy this file to .env and fill in your actual API key
+OPENAI_API_KEY=sk-...your-key-here...
+```
+
+**How to use in your script:**
+```python
+from dotenv import load_dotenv
+load_dotenv()
+```
+
+**In production:**
+- Set the `OPENAI_API_KEY` environment variable in your deployment environment (e.g., Docker, cloud, CI/CD, etc).
 
 
 # Hailo Inference
