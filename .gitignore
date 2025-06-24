@@ -86,3 +86,4 @@ tests/__pycache__/
 
 # Environment
 .env  # Ignore real secrets.env
+.env
