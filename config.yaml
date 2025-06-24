@@ -19,8 +19,8 @@ large_model:
     min_time_diff_seconds: 0.5 # Minimum time difference between images in the batch
 
 server_ips:
-  backend: "http://localhost:8000"
-  gradio: "http://localhost:7860"
+  backend: "http://localhost:8000"  # The address where the FastAPI backend service is running
+  gradio: "http://localhost:7860"   # The address where the Gradio UI service is running
 default_triggers:
   - "a person lying on the floor"
 rtsp_cameras:

@@ -13,6 +13,9 @@ import cv2
 import queue
 import multiprocessing
 import asyncio
+import traceback
+from inference.ollama_engine import OllamaError
+from inference.openai_engine import OpenAIError
 
 from video_source import get_video_stream, extract_i_frame, VideoStream, ImageFrame
 from buffer import init_frame_buffer, update_buffer, FrameBuffer
@@ -83,6 +86,8 @@ def inference_worker_process(input_queue, output_queue, stop_event, config):
     # Local buffer for batch mode
     rolling_frame_buffer = []
     while not stop_event.is_set():
+        engine_err = None  # Ensure always defined
+        e = None
         try:
             frame, trigger_description, timestamp = input_queue.get(timeout=1)
         except Exception:
@@ -105,18 +110,28 @@ def inference_worker_process(input_queue, output_queue, stop_event, config):
             if debug_save_frames:
                 try:
                     cv2.imwrite("small_infer_latest.jpg", frame)  # type: ignore[attr-defined]
-                except Exception as e:
-                    print(f"[DEBUG] Failed to save small inference frame: {e}")
-        except Exception as e:
-            print(f"[Orchestrator] [InferenceProcess] Small inference failed: {e}")
+                except Exception as e_inner:
+                    print(f"[DEBUG] Failed to save small inference frame: {e_inner}")
+        except (OllamaError, OpenAIError) as err:
+            print(f"[Orchestrator] [InferenceProcess] ENGINE ERROR (small): {err}")
+            traceback.print_exc()
             small_inference_out = None
+            small_result = None
+            engine_err = err
+        except Exception as err:
+            print(f"[Orchestrator] [InferenceProcess] UNEXPECTED ERROR (small): {err}")
+            traceback.print_exc()
+            small_inference_out = None
+            small_result = None
+            e = err
         # Immediately send small inference result
         result_payload = {
             "result": small_inference_out,
             "timestamp": time.time(),
             "frame": frame,
             "trigger": trigger_description,
-            "raw_result": getattr(small_result, 'raw_model_output', None) if small_inference_out else None
+            "raw_result": getattr(small_result, 'raw_model_output', None) if small_inference_out else None,
+            "error": str(engine_err) if engine_err is not None else (str(e) if e is not None else None)
         }
         output_queue.put(result_payload)
         # If trigger is met, run large inference and send a second result
@@ -167,8 +182,30 @@ def inference_worker_process(input_queue, output_queue, stop_event, config):
                     }
                 }
                 output_queue.put(result_payload_large)
+            except (OllamaError, OpenAIError) as engine_err:
+                print(f"[Orchestrator] [InferenceProcess] ENGINE ERROR (large): {engine_err}")
+                traceback.print_exc()
+                result_payload_large = {
+                    "result": small_inference_out,
+                    "timestamp": time.time(),
+                    "frame": frame,
+                    "trigger": trigger_description,
+                    "large_inference": None,
+                    "error": str(engine_err)
+                }
+                output_queue.put(result_payload_large)
             except Exception as e:
-                print(f"[Orchestrator] [InferenceProcess] Large inference failed: {e}")
+                print(f"[Orchestrator] [InferenceProcess] UNEXPECTED ERROR (large): {e}")
+                traceback.print_exc()
+                result_payload_large = {
+                    "result": small_inference_out,
+                    "timestamp": time.time(),
+                    "frame": frame,
+                    "trigger": trigger_description,
+                    "large_inference": None,
+                    "error": str(e)
+                }
+                output_queue.put(result_payload_large)
     print("[Orchestrator] [InferenceProcess] Exiting.")
 
 class Orchestrator:

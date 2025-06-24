@@ -1,4 +1,10 @@
-"""Tests for the unified inference system."""
+"""
+Unit tests for the unified inference system.
+- Covers mocked Ollama engine (initialization, process_frame, error handling).
+- Tests unified inference logic and error propagation.
+- Includes orchestrator error logging test (mocked).
+- Does not require real backend services; all network calls are mocked.
+"""
 
 import pytest
 import numpy as np
@@ -12,6 +18,7 @@ from inference import (
     OllamaEngine,
     OllamaError
 )
+import time
 
 @pytest.fixture
 def mock_response():
@@ -142,3 +149,48 @@ async def test_ollama_engine_error_handling(monkeypatch, test_image, test_trigge
         await engine.process_frame(test_image, test_trigger)
 
     await engine.shutdown()
+
+def test_orchestrator_engine_error_logging(monkeypatch):
+    """
+    Test that orchestrator logs and returns engine errors in the result payload.
+    Simulates an engine error and checks that the error is present in the output queue payload.
+    """
+    import multiprocessing
+    import queue
+    from inference.ollama_engine import OllamaError
+    from orchestrator import inference_worker_process
+
+    # Simulate input and output queues
+    input_queue = multiprocessing.Queue()
+    output_queue = multiprocessing.Queue()
+    stop_event = multiprocessing.Event()
+    config = {"batch_mode_enabled": False, "batch_size": 1}
+
+    # Dummy frame and trigger
+    dummy_frame = np.zeros((10, 10, 3), dtype=np.uint8)
+    dummy_trigger = "test trigger"
+    timestamp = time.time()
+
+    # Patch run_unified_inference to always raise OllamaError
+    async def fake_run_unified_inference(*args, **kwargs):
+        raise OllamaError("Simulated engine failure for test.")
+    monkeypatch.setattr("inference.unified.run_unified_inference", fake_run_unified_inference)
+
+    # Put a single item in the input queue
+    input_queue.put((dummy_frame, dummy_trigger, timestamp))
+    # Set stop_event after one iteration
+    def stop_after_one():
+        time.sleep(0.5)
+        stop_event.set()
+    import threading
+    threading.Thread(target=stop_after_one, daemon=True).start()
+
+    # Run the worker process (in the same process for test)
+    inference_worker_process(input_queue, output_queue, stop_event, config)
+
+    # Check output queue for error
+    result = output_queue.get(timeout=2)
+    print("[DEBUG] Orchestrator result payload:", result)
+    assert "error" in result, "Result payload missing 'error' key"
+    assert result["error"] is not None, "Result 'error' should not be None when engine fails"
+    assert "Inference failed" in result["error"], f"Unexpected error string: {result['error']}"

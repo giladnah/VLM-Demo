@@ -1,4 +1,8 @@
-"""Tests for the OpenAI inference engine."""
+"""
+Unit tests for the OpenAI inference engine.
+- Covers initialization, process_frame, error handling, and invalid response handling.
+- All network calls are mocked; does not require real OpenAI API access.
+"""
 
 import pytest
 import numpy as np

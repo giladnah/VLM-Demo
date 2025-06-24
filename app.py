@@ -10,6 +10,9 @@ import numpy as np
 import subprocess # For health check
 import json # For parsing ollama list output
 from fastapi.responses import FileResponse, StreamingResponse
+import traceback
+from inference.ollama_engine import OllamaError
+from inference.openai_engine import OpenAIError
 
 # --- Load environment variables from .env automatically ---
 from dotenv import load_dotenv
@@ -337,8 +340,16 @@ async def direct_small_inference(
     # If it were to use BackgroundTasks, the client would get an immediate 200 OK before result is ready.
     model_name = model_name or SMALL_MODEL_NAME
     ollama_server = ollama_server or SMALL_MODEL_OLLAMA_SERVER
-    # ollama_server may be None if using OpenAI; handle accordingly in run_unified_inference
-    inference_result = await run_unified_inference(image_np_array, trigger, model_type="small")
+    try:
+        inference_result = await run_unified_inference(image_np_array, trigger, model_type="small")
+    except (OllamaError, OpenAIError) as engine_err:
+        print(f"[API /infer/small] ENGINE ERROR: {engine_err}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Small VLM inference engine error: {engine_err}")
+    except Exception as e:
+        print(f"[API /infer/small] UNEXPECTED ERROR: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Small VLM inference failed: {e}")
 
     if inference_result is None:
         print(f"[API /infer/small] WARN: Small inference direct call returned no result for trigger '{trigger}'.")
@@ -381,8 +392,16 @@ async def direct_large_inference(image: UploadFile = File(...), model_name: Opti
     # Consider fastapi.concurrency.run_in_threadpool if it becomes a performance issue.
     model_name = model_name or LARGE_MODEL_NAME
     ollama_server = ollama_server or LARGE_MODEL_OLLAMA_SERVER
-    # ollama_server may be None if using OpenAI; handle accordingly in run_unified_inference
-    inference_result = await run_unified_inference(image_np_array, "", model_type="large")
+    try:
+        inference_result = await run_unified_inference(image_np_array, "", model_type="large")
+    except (OllamaError, OpenAIError) as engine_err:
+        print(f"[API /infer/large] ENGINE ERROR: {engine_err}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Large VLM inference engine error: {engine_err}")
+    except Exception as e:
+        print(f"[API /infer/large] UNEXPECTED ERROR: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Large VLM inference failed: {e}")
 
     if inference_result is None:
         print(f"[API /infer/large] WARN: Large inference direct call returned no result.")

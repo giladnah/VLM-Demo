@@ -35,7 +35,7 @@ class InferenceConfig(BaseModel):
     max_image_size: int = Field(default=616, gt=0)
     jpeg_quality: int = Field(default=90, ge=0, le=100)
     timeout_seconds: int = Field(default=90, gt=0)
-    retry_count: int = Field(default=3, ge=0)
+    retry_count: int = Field(default=2, ge=0)
     retry_cooldown: int = Field(default=5, gt=0)
     additional_params: Dict[str, Any] = Field(default_factory=dict)
 

@@ -37,11 +37,12 @@ A Vision-Language Model (VLM) Camera Service for real-time video analysis using 
 - Communicates with the FastAPI backend via HTTP.
 
 **7. Configuration**
-- `config.yaml`: Central config for model names, engine selection, server addresses, and default triggers.
+- `config.yaml`: Central config for model names, engine selection, server addresses, batch inference, debugging, and default triggers.
 - `.env`: Used for secure secret handling (e.g., OpenAI API keys).
 
 **8. Testing**
 - `tests/`: Pytest-based unit tests for core modules.
+
 
 ---
 
@@ -125,24 +126,34 @@ python vlm_app_runner.py
 
 ## Configuration: `config.yaml` (All Supported Options)
 
-This file controls model selection, inference engine, server addresses, and default triggers.
+This file controls model selection, inference engine, server addresses, batch inference, debugging, and default triggers.
 
 **Example:**
 ```yaml
 small_model:
   name: qwen2.5vl:3b                # Model name for small model (Ollama or OpenAI)
-  ollama_server: http://localhost:11434  # Ollama server address (if using Ollama)
-  # engine: ollama                  # (default) options: ollama, openai
+  ollama_server: http://10.41.74.178:11434  # Ollama server address (if using Ollama)
+  engine: ollama                  # (default) options: ollama, openai
 
 large_model:
-  name: gpt-4o                      # Model name for large model (Ollama or OpenAI)
-  engine: openai                    # options: openai, ollama
-  # ollama_server: http://localhost:11434  # Only needed if using Ollama
+  # Ollama example:
+  # engine: ollama
+  # name: qwen2.5vl:7b
+  # ollama_server: http://10.41.74.178:11434
+  # ollama_server: http://localhost:11434 # local ollama server
+
+  # OpenAI example:
+  engine: openai  # options: openai, ollama
+  name: gpt-4o-mini  # Use OpenAI GPT-4o (vision)
   # If engine: openai, the OpenAI API key must be set in the environment or .env file
+  batch_inference:
+    enabled: true           # Enable batch mode for large inference (OpenAI only)
+    batch_size: 4           # Number of images to send in a batch
+    min_time_diff_seconds: 0.5 # Minimum time difference between images in the batch
 
 server_ips:
-  backend: "http://localhost:8000"  # FastAPI backend address
-  gradio: "http://localhost:7860"   # Gradio UI address
+  backend: "http://localhost:8000"  # The address where the FastAPI backend service is running
+  gradio: "http://localhost:7860"   # The address where the Gradio UI service is running
 
 default_triggers:
   - "a person lying on the floor"
@@ -152,23 +163,35 @@ rtsp_cameras:
     address: "rtsp://192.168.241.62/axis-media/media.amp"
     username: "root"
     password: "hailo"
+
+# --- Debugging ---
+debug_save_frames: true # save inference frames to jpeg files for debugging purposes
 ```
 
 ### Option Descriptions
-- **name**: The model name to use. For OpenAI, use `gpt-4o` (recommended for vision). For Ollama, use e.g. `qwen2.5vl:3b` or `qwen2.5vl:7b`.
-- **engine**: Which inference engine to use. `ollama` (default) or `openai` (for OpenAI API).
-- **ollama_server**: The Ollama server address. Only needed if using Ollama.
-- **server_ips**: Backend and UI addresses.
+- **small_model.name**: The model name for the small model (Ollama or OpenAI).
+- **small_model.ollama_server**: Ollama server address for the small model (if using Ollama).
+- **small_model.engine**: (Optional) Engine to use for the small model (`ollama` or `openai`).
+- **large_model.name**: The model name for the large model (Ollama or OpenAI).
+- **large_model.engine**: Engine to use for the large model (`ollama` or `openai`).
+- **large_model.ollama_server**: Ollama server address for the large model (if using Ollama).
+- **large_model.batch_inference.enabled**: Enable batch mode for large inference (OpenAI only).
+- **large_model.batch_inference.batch_size**: Number of images to send in a batch (OpenAI only).
+- **large_model.batch_inference.min_time_diff_seconds**: Minimum time difference between images in the batch (OpenAI only).
+- **server_ips.backend**: The address where the FastAPI backend service is running.
+- **server_ips.gradio**: The address where the Gradio UI service is running.
 - **default_triggers**: List of default trigger descriptions.
-- **rtsp_cameras**: List of RTSP camera sources (with credentials if needed).
+- **rtsp_cameras**: List of RTSP camera sources. Each camera can have:
+  - `name`: Camera name
+  - `address`: RTSP URL
+  - `username`: (Optional) Username for camera
+  - `password`: (Optional) Password for camera
+- **debug_save_frames**: If true, saves frames for debugging purposes.
 
-#### **OpenAI Engine Usage**
-- Set `engine: openai` and `name: gpt-4o` (or another OpenAI model).
-- The OpenAI API key must be set in the environment (`OPENAI_API_KEY`) or in a `.env` file.
-- No `ollama_server` is needed for OpenAI.
-
-#### **Ollama Engine Usage**
-- Set `engine: ollama` (or omit for default) and provide `ollama_server` and `name`.
+#### Notes
+- If you change the model names, make sure to pull the corresponding models on your Ollama server.
+- For OpenAI models, ensure your `OPENAI_API_KEY` is set in your environment or `.env` file.
+- Batch inference is only supported for OpenAI engines.
 
 ---
 
@@ -176,7 +199,35 @@ rtsp_cameras:
 
 1. **Activate Virtual Environment**
 2. **Run Pytest**
-   - `python -m pytest` or `venv/bin/python -m pytest`
+   - `python -m pytest`
+
+---
+
+### Live Integration Test: Real Inference with Current Configuration
+
+A special integration test is provided in `tests/test_live_inference.py` to verify that your backend and models are working end-to-end with your current `config.yaml`.
+
+**What it does:**
+- Loads your current `config.yaml`.
+- For both the small and large model configuration:
+  - Prints the model-specific configuration (engine, model name, etc).
+  - Runs a real inference using a dummy image and a simple prompt ("a cat on a couch").
+  - Prints the full inference result (including the model's analysis and engine used).
+- Skips with a clear message if the config, required service, or environment variable is missing.
+
+**How to run:**
+```sh
+python -m pytest -s tests/test_live_inference.py
+```
+
+**What to expect:**
+- You will see debug output for both small and large models, including which engine/model is being used and the actual inference result.
+- If a required service is not running or config is missing, the test will skip with a clear message.
+
+**Use this test to:**
+- Quickly verify that your Ollama or OpenAI backend is working with your current configuration.
+- Debug configuration or service issues before running more complex workflows.
+
 
 ---
 
@@ -189,17 +240,20 @@ rtsp_cameras:
 - **POST /infer/small**: Directly runs small VLM inference on the uploaded image.
 - **POST /infer/large**: Directly runs large VLM inference on the uploaded image.
 
-See `http://localhost:8000/docs` when running for full OpenAPI documentation.
+See `http://localhost:8000/docs` when running for full API documentation.
 
 ---
 
 ## Troubleshooting & FAQ
 
-- **Large files:** Model weights and test videos are not tracked in Git. See `.gitignore`.
 - **Ollama errors:** Ensure the Ollama service is running and models are pulled.
 - **OpenAI errors:** Ensure your `OPENAI_API_KEY` is set in your environment or `.env` file. If you see errors about missing API keys, check your `.env` and restart the app.
 - **Webcam/RTSP issues:** Check device permissions and network connectivity.
-- **Tests failing:** Ensure all dependencies are installed and the virtual environment is active.
+- **Tests failing:**
+  - The tests for "inference" will use your current config.yaml, so make sure it is correct.
+  - Ensure all dependencies are installed and the virtual environment is active.
+  - Ensure the Ollama service is running and models are pulled.
+  - Ensure your `OPENAI_API_KEY` is set in your environment or `.env` file.
 
 ---
 
@@ -224,6 +278,29 @@ By default, Ollama listens only on `127.0.0.1` (localhost), which is not accessi
 ```sh
 OLLAMA_HOST=0.0.0.0 ollama serve
 ```
+## 3. Installing Required Models
+
+This project requires specific vision-language models to be available on your Ollama server. You must pull these models before running the backend or orchestrator.
+
+### Start the Ollama Server
+If not already running, start the Ollama server on your machine:
+```bash
+ollama serve
+```
+
+### Pull Required Models
+Run these commands on your Ollama server:
+```bash
+ollama pull qwen2.5vl:3b
+ollama pull qwen2.5vl:7b
+```
+
+You can check which models are available with:
+```bash
+ollama list
+```
+
+If you change the model names in `config.yaml`, make sure to pull the corresponding models.
 
 ## 3. Open Firewall Port (if needed)
 - Ensure port `11434` is open to your client machine(s).
@@ -240,6 +317,12 @@ OLLAMA_HOST=0.0.0.0 ollama serve
 ## 4. Test Remote Access
 From your client machine, run:
 ```sh
+curl http://10.41.74.178:11434/api/tags
+```
+You should receive a JSON response describing the available models.
+
+Run a test inference:
+```sh
 curl -X POST http://<REMOTE_IP>:11434/api/generate \
   -H "Content-Type: application/json" \
   -d '{"model": "qwen2.5vl:7b", "prompt": "Respond with: You are good to go!", "stream": false}'
@@ -255,6 +338,8 @@ You should receive a JSON response from the model.
   curl -X POST http://localhost:11434/api/generate ...
   ```
 - If you want to restrict access, consider using a VPN or firewall rules to limit which IPs can connect.
+- If you see errors about missing models, double-check the spelling and version in both `config.yaml` and your `ollama list` output.
+- If the Ollama server is running on a remote machine, ensure the `ollama_server` URL in `config.yaml` points to the correct address and port.
 
 ## Secure OpenAI API Key Handling
 
@@ -284,23 +369,5 @@ load_dotenv()
 # Hailo Inference
 It is built around the qwen-VL demo, https://hailotech.atlassian.net/wiki/spaces/CS/pages/2204664099/QWEN2-VL-2B+Demo+Installation
 
-To work with Hailo inference, you need to install the raw connection library from the qwen-VL demo in this venv (copy to venv/lib/python3.10/site-packages/)
-You'll need to setup the  HAILO_CONNECTION_PCIE_PORT environment variable to point to the Hailo device.
+Not implemented yet.
 
-```sh
-export HAILO_CONNECTION_PCIE_PORT=123
-```
-
-copy the hefs_and_embeddings directory from the qwen-VL demo to the project root.
-for example:
-```sh
-cp -r /home/giladn/tappas_apps/repos/QWEN2-2B_VL_Demo/hefs_and_embeddings .
-```
-
-The server side on the H10 should be running according to the instructions in the qwen-VL demo.
-
-You can test the inference by running the test_inference_small_hailo.py script.
-
-```sh
-python test_inference_small_hailo.py --image test_examples/test_image.jpg --trigger "a person has fallen"
-```
