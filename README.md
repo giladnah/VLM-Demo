@@ -1,4 +1,5 @@
 # VLM Camera Service
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/giladnah/VLM-Demo)
 
 A Vision-Language Model (VLM) Camera Service for real-time video analysis using small and large VLMs (e.g., Qwen2.5vl, OpenAI GPT-4o) via a unified inference engine. It provides:
 - A FastAPI backend for orchestration, inference, and API endpoints.
@@ -43,6 +44,45 @@ A Vision-Language Model (VLM) Camera Service for real-time video analysis using 
 **8. Testing**
 - `tests/`: Pytest-based unit tests for core modules.
 
+---
+## Architecture Diagram
+
+```mermaid
+graph TD
+    subgraph "User Interface"
+        A[User] -->|Interacts via Web Browser| B(Gradio UI);
+    end
+
+    B -->|"HTTP API Calls (start, get results)"| C{FastAPI Backend};
+
+    subgraph "Backend Core"
+        C -->|Starts/Manages| D[Orchestrator];
+        E[Video Source] -->|Frames| D;
+        D -->|Manages| F(Frame Buffer);
+        D -->|Small Model Inference| G{Unified VLM Inference};
+        G -->|Result| H[Trigger Logic];
+        H -->|If Trigger Met| D;
+        D -->|Large Model Inference| G;
+    end
+
+    subgraph "Inference & Configuration"
+        G -->|Uses Engine from| I[config.yaml];
+        I -->|Selects| J[Ollama Engine];
+        I -->|Selects| K[OpenAI Engine];
+        J -->|Connects to| L[Ollama Server];
+        M[.env] -->|API Key| K;
+        K -->|Connects to| N[OpenAI API];
+    end
+
+    style A fill:#f9f,stroke:#333,stroke-width:2px;
+    style B fill:#bbf,stroke:#333,stroke-width:2px;
+    style C fill:#9cf,stroke:#333,stroke-width:2px;
+    style D fill:#9f9,stroke:#333,stroke-width:2px;
+    style G fill:#f99,stroke:#333,stroke-width:2px;
+    style H fill:#f99,stroke:#333,stroke-width:2px;
+    style I fill:#fcf,stroke:#333,stroke-width:2px;
+    style M fill:#fcf,stroke:#333,stroke-width:2px;
+```
 
 ---
 
@@ -63,6 +103,17 @@ A Vision-Language Model (VLM) Camera Service for real-time video analysis using 
 7. **Secure Configuration**: All secrets (e.g., OpenAI API keys) are handled via environment variables or `.env` files, never committed to git.
 
 ---
+
+Opens and future tasks:
+- Add Hailo inference engine
+- Add support for multiple triggers (Different triggers for small and large models)
+- Add live video streaming to UI
+- Add support for modifying the prompt (currently defined in per engine code)
+- Fine tune application flow, and performance.
+- Refactor code to be more modular and easier to maintain.
+- Consider which VLM provider to use (Ollama, OpenAI, QWEN, Open Router etc.)
+- Consider building a UI only application, depends on Hailo RESTful API.
+
 
 ## Setup and Installation
 
