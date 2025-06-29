@@ -46,6 +46,9 @@ A Vision-Language Model (VLM) Camera Service for real-time video analysis using 
 
 ---
 ## Architecture Diagram
+![Architecture Diagram](./VLM-diagram.png)
+
+## Architecture Implementation
 
 ```mermaid
 graph TD
